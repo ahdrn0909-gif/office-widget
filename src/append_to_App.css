@@ -1,0 +1,57 @@
+/* ========================================================= */
+/* ↓↓↓ 여기부터 v0.1.6 추가분 (위치고정 + 쪽지종류) ↓↓↓ */
+/* ========================================================= */
+
+/* 위치 고정 버튼 */
+.win-btn.pin {
+  font-size: 12px;
+  opacity: 0.65;
+  transition: opacity 0.15s, background 0.15s;
+}
+.win-btn.pin:hover { opacity: 1; }
+.win-btn.pin.on {
+  opacity: 1;
+  background: rgba(10, 132, 255, 0.28);
+  border-radius: 6px;
+}
+
+/* 쪽지 종류 선택 (단순전달 / 업무요청) */
+.msg-kind-row {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.msg-kind-btn {
+  flex: 1;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d0d0d5;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.msg-kind-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.msg-kind-btn.on {
+  background: rgba(10, 132, 255, 0.22);
+  border-color: rgba(10, 132, 255, 0.6);
+  color: #fff;
+  font-weight: 600;
+}
+.msg-kind-btn.task.on {
+  background: rgba(255, 159, 10, 0.22);
+  border-color: rgba(255, 159, 10, 0.6);
+}
+.msg-kind-help {
+  font-size: 11px;
+  color: #9a9aa0;
+  margin: 2px 0 6px;
+  line-height: 1.4;
+}
+
+/* 전달(단순전달) 뱃지 */
+.msg-badge.notice {
+  background: rgba(100, 210, 255, 0.18);
+  color: #64d2ff;
+}

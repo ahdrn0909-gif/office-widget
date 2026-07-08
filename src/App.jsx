@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalPosition } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -24,6 +25,17 @@ const openFilter = (special, scope) => {
   const q = scope ? `?filter=${special}&scope=${scope}` : `?filter=${special}`;
   try { openUrl(`${APP_URL}/${q}`); } catch (e) {}
 };
+
+/* ===== 위젯 위치/고정 상태 저장 (이 PC에만 저장, 기기별 독립) ===== */
+const POS_KEY = "widget_pos_v1";
+const PIN_KEY = "widget_pinned_v1";
+function loadSavedPos() {
+  try { const raw = localStorage.getItem(POS_KEY); if (!raw) return null; const p = JSON.parse(raw); if (typeof p.x === "number" && typeof p.y === "number") return p; } catch (e) {}
+  return null;
+}
+function saveSavedPos(x, y) { try { localStorage.setItem(POS_KEY, JSON.stringify({ x, y })); } catch (e) {} }
+function loadSavedPin() { try { return localStorage.getItem(PIN_KEY) === "1"; } catch (e) { return false; } }
+function saveSavedPin(on) { try { localStorage.setItem(PIN_KEY, on ? "1" : "0"); } catch (e) {} }
 
 /* ===== 유틸 ===== */
 const today = () => new Date().toISOString().slice(0, 10);
@@ -998,7 +1010,7 @@ function fmtMsgTime(ms) {
 function Compose({ staff, myId, onSend }) {
   const [body, setBody] = useState("");
   const [toIds, setToIds] = useState([]);
-  const [isTask, setIsTask] = useState(false);
+  const [kind, setKind] = useState("notice"); // notice=단순전달, task=업무요청
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const others = (staff || []).filter((s) => s.id !== myId);
@@ -1009,8 +1021,8 @@ function Compose({ staff, myId, onSend }) {
     if (!body.trim()) { setErr("내용을 입력하세요."); return; }
     if (toIds.length === 0) { setErr("받는 사람을 선택하세요."); return; }
     setBusy(true); setErr("");
-    await onSend({ toIds, body: body.trim(), isTask });
-    setBusy(false); setBody(""); setToIds([]); setIsTask(false);
+    await onSend({ toIds, body: body.trim(), isTask: kind === "task" });
+    setBusy(false); setBody(""); setToIds([]); setKind("notice");
   };
   return (
     <div className="msg-compose">
@@ -1028,10 +1040,21 @@ function Compose({ staff, myId, onSend }) {
           ))}
         </div>
       )}
+      <div className="af-color-label">쪽지 종류</div>
+      <div className="msg-kind-row">
+        <button type="button" className={"msg-kind-btn" + (kind === "notice" ? " on" : "")} onClick={() => setKind("notice")}>
+          단순 전달
+        </button>
+        <button type="button" className={"msg-kind-btn task" + (kind === "task" ? " on" : "")} onClick={() => setKind("task")}>
+          업무 요청
+        </button>
+      </div>
+      <div className="msg-kind-help">
+        {kind === "notice"
+          ? "받는 사람이 '확인'을 누르면 나에게 확인함으로 표시돼요."
+          : "받는 사람이 '처리완료'를 누르면 나에게 처리완료로 표시돼요."}
+      </div>
       <textarea className="msg-ta" placeholder="쪽지 내용" value={body} onChange={(e) => setBody(e.target.value)} />
-      <label className="af-check">
-        <input type="checkbox" checked={isTask} onChange={(e) => setIsTask(e.target.checked)} /> 업무 요청 (받는 사람이 완료 표시)
-      </label>
       {err && <div className="af-err">{err}</div>}
       <button className="nv-btn primary" onClick={send} disabled={busy}>{busy ? "보내는 중..." : "보내기"}</button>
     </div>
@@ -1048,11 +1071,8 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
   const inbox = (messages || []).filter((m) => Array.isArray(m.toIds) && m.toIds.includes(myId)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const sent = (messages || []).filter((m) => m.fromId === myId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-  const openInbox = (m) => {
-    const willOpen = openId !== m.id;
-    setOpenId(willOpen ? m.id : null);
-    if (willOpen && !(m.reads && m.reads[myId])) onMarkRead(m.id);
-  };
+  // 받은쪽지 펼치기: 열기만 해서는 자동 확인 처리하지 않음 (명시적 버튼으로만 처리)
+  const openInbox = (m) => { setOpenId(openId !== m.id ? m.id : null); };
 
   return (
     <div className="msg-wrap">
@@ -1069,24 +1089,35 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
       {view === "inbox" && (
         inbox.length === 0 ? <div className="empty">받은 쪽지 없음</div> :
           inbox.map((m) => {
-            const unread = !(m.reads && m.reads[myId]);
+            const isTask = !!m.isTask;
+            // 단순 전달: reads 로 확인 여부 판단 / 업무 요청: done 으로 완료 여부 판단
+            const confirmed = isTask ? !!(m.done && m.done[myId]) : !!(m.reads && m.reads[myId]);
+            const pending = !confirmed;
             const open = openId === m.id;
-            const doneMine = m.done && m.done[myId];
             return (
               <div className="msg-item" key={m.id}>
                 <div className="msg-head" onClick={() => openInbox(m)}>
-                  {unread ? <span className="msg-unread" /> : <span className="msg-unread off" />}
+                  {pending ? <span className="msg-unread" /> : <span className="msg-unread off" />}
                   <span className="msg-from">{nameOf(m.fromId)}</span>
-                  {m.isTask && <span className="msg-badge task">업무</span>}
-                  {m.isTask && doneMine && <span className="msg-badge done">완료</span>}
+                  {isTask
+                    ? <span className="msg-badge task">업무</span>
+                    : <span className="msg-badge notice">전달</span>}
+                  {confirmed && <span className="msg-badge done">{isTask ? "처리완료" : "확인함"}</span>}
                   <span className="msg-preview">{m.body}</span>
                   <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
                 </div>
                 {open && (
                   <div className="msg-body">
                     <div className="msg-text">{m.body}</div>
-                    {m.isTask && !doneMine && <button className="nv-btn primary" onClick={() => onMarkDone(m.id)}>업무 완료 처리</button>}
-                    {m.isTask && doneMine && <span className="memo-saved">완료했어요 ✓ ({fmtMsgTime(doneMine)})</span>}
+                    {isTask ? (
+                      confirmed
+                        ? <span className="memo-saved">처리완료했어요 ✓ ({fmtMsgTime(m.done[myId])})</span>
+                        : <button className="nv-btn primary" onClick={() => onMarkDone(m.id)}>처리완료</button>
+                    ) : (
+                      confirmed
+                        ? <span className="memo-saved">확인했어요 ✓ ({fmtMsgTime(m.reads[myId])})</span>
+                        : <button className="nv-btn primary" onClick={() => onMarkRead(m.id)}>확인</button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1097,12 +1128,15 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
       {view === "sent" && (
         sent.length === 0 ? <div className="empty">보낸 쪽지 없음</div> :
           sent.map((m) => {
+            const isTask = !!m.isTask;
             const open = openId === m.id;
             return (
               <div className="msg-item" key={m.id}>
                 <div className="msg-head" onClick={() => setOpenId(open ? null : m.id)}>
                   <span className="msg-from">→ {(m.toIds || []).map(nameOf).join(", ")}</span>
-                  {m.isTask && <span className="msg-badge task">업무</span>}
+                  {isTask
+                    ? <span className="msg-badge task">업무</span>
+                    : <span className="msg-badge notice">전달</span>}
                   <span className="msg-preview">{m.body}</span>
                   <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
                 </div>
@@ -1111,13 +1145,17 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
                     <div className="msg-text">{m.body}</div>
                     <div className="msg-status">
                       {(m.toIds || []).map((tid) => {
-                        const read = m.reads && m.reads[tid];
                         const done = m.done && m.done[tid];
+                        const read = m.reads && m.reads[tid];
+                        // 단순 전달: 확인함/미확인 / 업무 요청: 처리완료/진행중
+                        const stateLabel = isTask
+                          ? (done ? "처리완료" : "진행중")
+                          : (read ? "확인함" : "미확인");
+                        const stateOn = isTask ? !!done : !!read;
                         return (
                           <div className="msg-stat-row" key={tid}>
                             <span className="msg-stat-name">{nameOf(tid)}</span>
-                            <span className={read ? "msg-stat read" : "msg-stat"}>{read ? "읽음" : "안읽음"}</span>
-                            {m.isTask && <span className={done ? "msg-stat done" : "msg-stat"}>{done ? "완료" : "진행중"}</span>}
+                            <span className={stateOn ? "msg-stat done" : "msg-stat"}>{stateLabel}</span>
                           </div>
                         );
                       })}
@@ -1248,6 +1286,7 @@ function App() {
   const [showHeader, setShowHeader] = useState(true);
   const [updateInfo, setUpdateInfo] = useState(null);
   const [updating, setUpdating] = useState(false);
+  const [pinned, setPinned] = useState(loadSavedPin()); // 위치 고정 여부
 
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -1258,6 +1297,37 @@ function App() {
 
   const minimize = async () => { try { await appWindow.minimize(); } catch (e) {} };
   const close = async () => { try { await appWindow.close(); } catch (e) {} };
+
+  // 시작 시: 저장된 위치가 있으면 그 자리로 복원
+  useEffect(() => {
+    const p = loadSavedPos();
+    if (p) { try { appWindow.setPosition(new LogicalPosition(p.x, p.y)); } catch (e) {} }
+  }, []);
+
+  // 창을 옮길 때마다 현재 위치를 저장 (다음에 켤 때 이 자리로 복원)
+  useEffect(() => {
+    let unlisten = null;
+    (async () => {
+      try {
+        unlisten = await appWindow.onMoved(({ payload }) => {
+          if (payload && typeof payload.x === "number" && typeof payload.y === "number") {
+            saveSavedPos(payload.x, payload.y);
+          }
+        });
+      } catch (e) {}
+    })();
+    return () => { if (unlisten) { try { unlisten(); } catch (e) {} } };
+  }, []);
+
+  // 고정 상태가 바뀌면 저장 (다음에 켤 때 같은 상태로)
+  const togglePin = () => {
+    setPinned((prev) => {
+      const next = !prev;
+      saveSavedPin(next);
+      // 고정하면 최소화 상태였을 수 있으니 헤더는 유지, 별도 창 처리 없음(드래그는 렌더에서 차단)
+      return next;
+    });
+  };
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -1398,7 +1468,11 @@ function App() {
   const staffName = (id) => (staff || []).find((s) => s.id === id)?.name || "";
 
   const unreadCount = useMemo(
-    () => (messages || []).filter((m) => Array.isArray(m.toIds) && m.toIds.includes(myId) && !(m.reads && m.reads[myId])).length,
+    () => (messages || []).filter((m) => {
+      if (!(Array.isArray(m.toIds) && m.toIds.includes(myId))) return false;
+      // 단순 전달=확인(reads) 안했으면 미처리 / 업무 요청=처리완료(done) 안했으면 미처리
+      return m.isTask ? !(m.done && m.done[myId]) : !(m.reads && m.reads[myId]);
+    }).length,
     [messages, myId]
   );
 
@@ -1518,7 +1592,7 @@ function App() {
   const logout = async () => { try { await signOut(auth); } catch (e) {} };
 
   const DragBar = ({ children }) => (
-    <div className="drag-bar" data-tauri-drag-region>{children}</div>
+    <div className="drag-bar" {...(pinned ? {} : { "data-tauri-drag-region": true })}>{children}</div>
   );
 
   if (checking) {
@@ -1526,7 +1600,7 @@ function App() {
       <div className="widget" style={{ background: bg }}>
         <DragBar>
           <div style={{ flex: 1 }} />
-          <button className="win-btn" onClick={minimize} title="최소화">﹣</button>
+          {!pinned && <button className="win-btn" onClick={minimize} title="최소화">﹣</button>}
           <button className="win-btn close" onClick={close} title="닫기">✕</button>
         </DragBar>
         <div className="center-msg">불러오는 중...</div>
@@ -1540,7 +1614,7 @@ function App() {
         <DragBar>
           <span className="drag-title">참괜찮은 사무실 위젯</span>
           <div style={{ flex: 1 }} />
-          <button className="win-btn" onClick={minimize} title="최소화">﹣</button>
+          {!pinned && <button className="win-btn" onClick={minimize} title="최소화">﹣</button>}
           <button className="win-btn close" onClick={close} title="닫기">✕</button>
         </DragBar>
         <div className="login-box">
@@ -1567,7 +1641,7 @@ function App() {
   return (
     <div className="widget" style={{ background: bg }}>
       {showHeader ? (
-        <div className="widget-header" data-tauri-drag-region>
+        <div className="widget-header" {...(pinned ? {} : { "data-tauri-drag-region": true })}>
           <div className="tabs">
             <button className={tab === "cases" ? "tab active" : "tab"} onClick={() => setTab("cases")}>내 사건</button>
             <button className={tab === "calendar" ? "tab active" : "tab"} onClick={() => setTab("calendar")}>캘린더</button>
@@ -1578,13 +1652,15 @@ function App() {
           <div className="header-right">
             <input className="opacity-slider" type="range" min="0.2" max="1" step="0.05"
               value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} title="배경 투명도" />
+            <button className={pinned ? "win-btn pin on" : "win-btn pin"} onClick={togglePin} title={pinned ? "고정 해제" : "위치 고정"}>📌</button>
             <button className="win-btn" onClick={() => setShowHeader(false)} title="헤더 숨기기">▴</button>
-            <button className="win-btn" onClick={minimize} title="최소화">﹣</button>
+            {!pinned && <button className="win-btn" onClick={minimize} title="최소화">﹣</button>}
             <button className="win-btn close" onClick={close} title="닫기">✕</button>
           </div>
         </div>
       ) : (
-        <div className="widget-handle" data-tauri-drag-region>
+        <div className="widget-handle" {...(pinned ? {} : { "data-tauri-drag-region": true })}>
+          <button className={pinned ? "win-btn pin on" : "win-btn pin"} onClick={togglePin} title={pinned ? "고정 해제" : "위치 고정"}>📌</button>
           <button className="win-btn" onClick={() => setShowHeader(true)} title="헤더 보이기">▾</button>
         </div>
       )}
