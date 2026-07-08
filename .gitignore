@@ -27,9 +27,10 @@ dist-ssr
 /src-tauri/target
 target
 
-# 비밀 정보 (Firebase 접속 설정)
+# 비밀 정보
 firebase.js
 src/firebase.js
 
 # 자동 업데이트 서명 키 (절대 올리면 안 됨)
 *.key
+.tauri/

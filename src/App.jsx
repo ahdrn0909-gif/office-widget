@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { check as checkUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import {
   setPersistence,
   browserLocalPersistence,
@@ -1244,6 +1246,8 @@ function App() {
   const [tab, setTab] = useState("cases");
   const [opacity, setOpacity] = useState(1);
   const [showHeader, setShowHeader] = useState(true);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updating, setUpdating] = useState(false);
 
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -1364,6 +1368,17 @@ function App() {
     if (!user || !profile) return;
     const t = setInterval(() => { loadMessages(); }, 45000);
     return () => clearInterval(t);
+  }, [user, profile]);
+
+  useEffect(() => {
+    if (!user || !profile) return;
+    const doCheck = async () => {
+      try {
+        const u = await checkUpdate();
+        if (u) setUpdateInfo(u);
+      } catch (e) {} // dev 모드에서 실패 = 정상
+    };
+    doCheck();
   }, [user, profile]);
 
   // 현재 사용자 식별 (사무실앱과 동일: legacyStaffId 우선)
@@ -1581,6 +1596,19 @@ function App() {
             <button className="logout-btn" onClick={loadData} title="새로고침">↻</button>
             <button className="logout-btn" onClick={logout}>로그아웃</button>
           </div>
+        </div>
+      )}
+
+      {updateInfo && (
+        <div className="update-banner">
+          <span className="update-txt">🎉 새 버전 {updateInfo.version} 업데이트 있음</span>
+          <button className="update-btn" disabled={updating} onClick={async () => {
+            setUpdating(true);
+            try { await updateInfo.downloadAndInstall(); await relaunch(); }
+            catch (e) { setUpdating(false); }
+          }}>
+            {updating ? "설치 중..." : "업데이트"}
+          </button>
         </div>
       )}
 

@@ -38,6 +38,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdDN0VEN0JBMzRFRkMzNwpSV1EzL0U2amUrM0hCMkEzeG5hdE1kNEhMMUhTK0NiMkh5dG8xQ0E0bS9vbXVaelJNcXpDTzROQwo=",
+      "endpoints": [
+        "https://github.com/ahdrn0909-gif/office-widget/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
