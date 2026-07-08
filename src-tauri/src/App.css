@@ -1,0 +1,154 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 창을 완전 투명으로 → 둥근 모서리 바깥은 바탕화면이 그대로 보이게 */
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  user-select: none;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, "Malgun Gothic", "Pretendard", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 위젯 본체: 둥근 모서리 + 얇은 테두리 (그림자/블러 없음 → 검은 각 방지) */
+.widget {
+  width: 100vw;
+  height: 100vh;
+  color: #e8e8ea;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+/* 헤더: 투명, 잡고 드래그하면 창 이동 */
+.widget-header {
+  padding: 9px 9px 9px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.widget-handle {
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 탭: 알약형 세그먼트 */
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px;
+  border-radius: 9px;
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  color: #9a9aa0;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: #d8d8dc;
+}
+
+/* 선택 탭: 흰색 알약 + 어두운 글씨 */
+.tab.active {
+  background: rgba(255, 255, 255, 0.95);
+  color: #1c1c1e;
+  font-weight: 600;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.opacity-slider {
+  width: 46px;
+  height: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  margin-right: 3px;
+}
+.opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.win-btn {
+  border: none;
+  background: transparent;
+  color: #9a9aa0;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.12s ease;
+}
+
+.win-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.win-btn.close:hover {
+  background: #ff453a;
+  color: #fff;
+}
+
+.widget-body {
+  flex: 1;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.widget-body::-webkit-scrollbar {
+  width: 6px;
+}
+.widget-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.placeholder {
+  font-size: 13px;
+  color: #8e8e93;
+  text-align: center;
+  margin-top: 44px;
+  line-height: 1.7;
+}
