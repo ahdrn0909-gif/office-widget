@@ -23,14 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
-# Rust / Tauri 빌드 산출물 (무거워서 제외)
+# Rust / Tauri
 /src-tauri/target
 target
 
-# 비밀 정보
-firebase.js
-src/firebase.js
-
-# 자동 업데이트 서명 키 (절대 올리면 안 됨)
+# 서명키 (절대 올리지 말 것)
 *.key
 .tauri/
