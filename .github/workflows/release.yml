@@ -41,3 +41,4 @@ jobs:
           releaseBody: "Auto update release"
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: true
