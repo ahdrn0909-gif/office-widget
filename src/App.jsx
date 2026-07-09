@@ -1189,41 +1189,51 @@ function isSentPending(m) {
   if (m.isTask) return !ids.every((id) => m.done && m.done[id]);
   return !ids.every((id) => m.reads && m.reads[id]);
 }
-function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onDeleteMessage, onAddTodo }) {
-  const [view, setView] = useState("inbox");
+/* 계정별 휴지통: 각자 자기 화면에서만 숨김. unsent=보내기취소(수신자에게서도 사라짐), trashed=구버전(전역) 호환 */
+function msgHiddenInbox(m, uid) { return !!(m.unsent || m.trashed || (m.trashedBy && m.trashedBy[uid])); }
+function msgHiddenSent(m, uid) { return !!(m.trashed || (m.trashedBy && m.trashedBy[uid])); }
+function msgInTrash(m, uid) {
+  if (m.purgedBy && m.purgedBy[uid]) return false;
+  if (m.trashedBy && m.trashedBy[uid]) return true;
+  if (m.trashed && m.fromId === uid) return true; // 구버전 전역 trashed = 보낸사람 휴지통
+  return false;
+}
+function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onUnsend, onTrashMine, onEmptyTrash, trashLogs, isAdmin, onAddTodo }) {
   const [openId, setOpenId] = useState(null);
   const [delId, setDelId] = useState(null);
   const [inboxAll, setInboxAll] = useState(false);
   const [sentAll, setSentAll] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsView, setSettingsView] = useState("trash");
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
   // 해야할일 등록 폼
   const [todoForId, setTodoForId] = useState(null);
   const [tTitle, setTTitle] = useState("");
   const [tBody, setTBody] = useState("");
-  const [todoDone, setTodoDone] = useState(null); // 방금 등록 완료한 쪽지 id
+  const [todoDone, setTodoDone] = useState(null);
   const nameOf = (id) => ((staff || []).find((s) => s.id === id)?.name) || id;
 
-  // 미확인(미처리)을 위로, 그다음 최신순
   const byPendingThenTime = (pendFn) => (a, b) => {
     const pa = pendFn(a) ? 1 : 0, pb = pendFn(b) ? 1 : 0;
     if (pa !== pb) return pb - pa;
     return (b.createdAt || 0) - (a.createdAt || 0);
   };
-  const inbox = (messages || []).filter((m) => Array.isArray(m.toIds) && m.toIds.includes(myId)).sort(byPendingThenTime((m) => isInboxPending(m, myId)));
-  const sent = (messages || []).filter((m) => m.fromId === myId).sort(byPendingThenTime(isSentPending));
+  const inbox = (messages || []).filter((m) => !msgHiddenInbox(m, myId) && Array.isArray(m.toIds) && m.toIds.includes(myId)).sort(byPendingThenTime((m) => isInboxPending(m, myId)));
+  const sent = (messages || []).filter((m) => !msgHiddenSent(m, myId) && m.fromId === myId).sort(byPendingThenTime(isSentPending));
+  const trash = (messages || []).filter((m) => msgInTrash(m, myId)).sort((a, b) => {
+    const ta = (a.trashedBy && a.trashedBy[myId]) || a.trashedAt || 0;
+    const tb = (b.trashedBy && b.trashedBy[myId]) || b.trashedAt || 0;
+    return tb - ta;
+  });
+  const logs = [...(trashLogs || [])].sort((a, b) => (b.at || 0) - (a.at || 0));
   const inboxPendingCount = inbox.filter((m) => isInboxPending(m, myId)).length;
   const sentPendingCount = sent.filter(isSentPending).length;
   const inboxShown = inboxAll ? inbox : inbox.slice(0, MSG_PAGE);
   const sentShown = sentAll ? sent : sent.slice(0, MSG_PAGE);
 
-  // 받은쪽지 펼치기: 열기만 해서는 자동 확인 처리하지 않음 (명시적 버튼으로만 처리)
   const openInbox = (m) => { setOpenId(openId !== m.id ? m.id : null); };
-
-  const openTodoForm = (m) => {
-    setTodoForId(m.id);
-    setTTitle("");
-    setTBody(m.body || "");
-    setTodoDone(null);
-  };
+  const openTodoForm = (m) => { setTodoForId(m.id); setTTitle(""); setTBody(m.body || ""); setTodoDone(null); };
   const submitTodo = async () => {
     if (!tTitle.trim()) return;
     await onAddTodo({ title: tTitle, body: tBody });
@@ -1231,153 +1241,264 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
     setTodoForId(null); setTTitle(""); setTBody("");
     setTodoDone(doneFor);
   };
+  const closeSettings = () => { setShowSettings(false); setConfirmEmpty(false); };
+
+  const renderInboxItem = (m) => {
+    const isTask = !!m.isTask;
+    const read = !!(m.reads && m.reads[myId]);
+    const done = !!(m.done && m.done[myId]);
+    const pending = isTask ? !done : !read;
+    const stage = inboxStageOf(m, myId);
+    const open = openId === m.id;
+    return (
+      <div className="msg-item" key={m.id}>
+        <div className="msg-head" onClick={() => openInbox(m)}>
+          {pending ? <span className="msg-unread" /> : <span className="msg-unread off" />}
+          <span className="msg-from">{nameOf(m.fromId)}</span>
+          {isTask ? <span className="msg-badge task">업무</span> : <span className="msg-badge notice">전달</span>}
+          {stage.label && <span className={"msg-badge " + stage.cls}>{stage.label}</span>}
+          <span className="msg-preview">{m.body}</span>
+          <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
+        </div>
+        {open && (
+          <div className="msg-body">
+            <div className="msg-text">{m.body}</div>
+            {isTask ? (
+              done ? (
+                <span className="memo-saved">처리완료했어요 ✓ ({fmtMsgTime(m.done[myId])})</span>
+              ) : read ? (
+                <div className="msg-step">
+                  <span className="memo-saved">확인함 ✓ ({fmtMsgTime(m.reads[myId])})</span>
+                  <button className="nv-btn primary" onClick={() => onMarkDone(m.id)}>처리완료</button>
+                </div>
+              ) : (
+                <button className="nv-btn primary" onClick={() => onMarkRead(m.id)}>확인함</button>
+              )
+            ) : (
+              read
+                ? <span className="memo-saved">확인했어요 ✓ ({fmtMsgTime(m.reads[myId])})</span>
+                : <button className="nv-btn primary" onClick={() => onMarkRead(m.id)}>확인</button>
+            )}
+            {todoForId === m.id ? (
+              <div className="msg-todo-form">
+                <div className="af-color-label">해야할일 등록</div>
+                <input className="af-input" placeholder="할 일 제목" value={tTitle} onChange={(e) => setTTitle(e.target.value)} />
+                <textarea className="af-memo" placeholder="내용 (선택)" value={tBody} onChange={(e) => setTBody(e.target.value)} />
+                <div className="af-btns">
+                  <button className="nv-btn primary" onClick={submitTodo} disabled={!tTitle.trim()}>등록</button>
+                  <button className="nv-btn" onClick={() => { setTodoForId(null); setTTitle(""); setTBody(""); }}>취소</button>
+                </div>
+              </div>
+            ) : todoDone === m.id ? (
+              <span className="memo-saved">해야할일에 등록됐어요 ✓ (내 사건 탭에서 확인)</span>
+            ) : (
+              <button className="msg-todo-btn" onClick={() => openTodoForm(m)}>+ 해야할일 등록</button>
+            )}
+            {delId === m.id ? (
+              <span className="ev-del-wrap">
+                <button className="ev-del yes" onClick={() => { onTrashMine(m.id); setDelId(null); }}>휴지통으로</button>
+                <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
+              </span>
+            ) : (
+              <button className="msg-del" onClick={() => setDelId(m.id)}>휴지통으로 이동</button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderSentItem = (m) => {
+    const isTask = !!m.isTask;
+    const open = openId === m.id;
+    const st = sentStatusOf(m);
+    const anyRead = (m.toIds || []).some((id) => m.reads && m.reads[id]);
+    return (
+      <div className="msg-item" key={m.id}>
+        <div className="msg-head" onClick={() => setOpenId(open ? null : m.id)}>
+          <span className="msg-from">→ {(m.toIds || []).map(nameOf).join(", ")}</span>
+          {isTask ? <span className="msg-badge task">업무</span> : <span className="msg-badge notice">전달</span>}
+          {st.label && <span className={"msg-badge " + st.cls}>{st.label}</span>}
+          <span className="msg-preview">{m.body}</span>
+          <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
+        </div>
+        {open && (
+          <div className="msg-body">
+            <div className="msg-text">{m.body}</div>
+            <div className="msg-status">
+              {(m.toIds || []).map((tid) => {
+                const done = m.done && m.done[tid];
+                const read = m.reads && m.reads[tid];
+                const stateLabel = isTask ? (done ? "처리완료" : read ? "확인함" : "미확인") : (read ? "확인함" : "미확인");
+                const stateCls = (isTask ? (done ? "done" : read ? "read" : "") : (read ? "done" : ""));
+                return (
+                  <div className="msg-stat-row" key={tid}>
+                    <span className="msg-stat-name">{nameOf(tid)}</span>
+                    <span className={"msg-stat " + stateCls}>{stateLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {anyRead ? (
+              <div className="msg-locked-row">
+                <span className="msg-del-locked">상대가 확인한 것은 보내기취소를 하지 못합니다.</span>
+                {delId === m.id ? (
+                  <span className="ev-del-wrap">
+                    <button className="ev-del yes" onClick={() => { onTrashMine(m.id); setDelId(null); }}>휴지통으로</button>
+                    <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
+                  </span>
+                ) : (
+                  <button className="msg-del" onClick={() => setDelId(m.id)}>휴지통으로 이동</button>
+                )}
+              </div>
+            ) : delId === m.id ? (
+              <span className="ev-del-wrap">
+                <button className="ev-del yes" onClick={() => { onUnsend(m.id); setDelId(null); }}>보내기취소</button>
+                <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
+              </span>
+            ) : (
+              <button className="msg-del" onClick={() => setDelId(m.id)}>보내기 취소</button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const trashPanel = (
+    trash.length === 0 ? <div className="empty">휴지통이 비어 있어요</div> : (
+      <>
+        <div className="trash-head">
+          <span className="trash-info">보내기취소한 쪽지 {trash.length}건</span>
+          {confirmEmpty ? (
+            <span className="ev-del-wrap">
+              <button className="ev-del yes" onClick={async () => { await onEmptyTrash(); setConfirmEmpty(false); }}>비우기</button>
+              <button className="ev-del no" onClick={() => setConfirmEmpty(false)}>취소</button>
+            </span>
+          ) : (
+            <button className="trash-empty-btn" onClick={() => setConfirmEmpty(true)}>휴지통 비우기</button>
+          )}
+        </div>
+        {confirmEmpty && <div className="trash-warn">비우면 영구 삭제되고, 관리자 기록에 남아요.</div>}
+        {trash.map((m) => {
+          const open = openId === m.id;
+          const mine = m.fromId === myId;
+          return (
+            <div className="msg-item" key={m.id}>
+              <div className="msg-head" onClick={() => setOpenId(open ? null : m.id)}>
+                <span className="msg-from">{mine ? "→ " + (m.toIds || []).map(nameOf).join(", ") : nameOf(m.fromId)}</span>
+                {m.isTask ? <span className="msg-badge task">업무</span> : <span className="msg-badge notice">전달</span>}
+                <span className="msg-badge gray-badge">{mine ? "보낸" : "받은"}</span>
+                <span className="msg-preview">{m.body}</span>
+                <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
+              </div>
+              {open && <div className="msg-body"><div className="msg-text">{m.body}</div></div>}
+            </div>
+          );
+        })}
+      </>
+    )
+  );
+
+  const logsPanel = (
+    logs.length === 0 ? <div className="empty">휴지통 비우기 기록 없음</div> : (
+      logs.map((l) => {
+        const open = openId === l.id;
+        return (
+          <div className="msg-item" key={l.id}>
+            <div className="msg-head" onClick={() => setOpenId(open ? null : l.id)}>
+              <span className="msg-from">{l.byName || l.byId}</span>
+              <span className="msg-badge read">비움 {l.count}건</span>
+              <span className="msg-preview"></span>
+              <span className="msg-time">{fmtMsgTime(l.at)}</span>
+            </div>
+            {open && (
+              <div className="msg-body">
+                {(l.items || []).length === 0 ? (
+                  <div className="empty">(내용 없음)</div>
+                ) : (
+                  (l.items || []).map((it, idx) => (
+                    <div className="log-item" key={idx}>
+                      <div className="log-line">
+                        <span className="log-to">{it.fromId ? nameOf(it.fromId) + " → " : "→ "}{(it.toIds || []).map(nameOf).join(", ")}</span>
+                        {it.isTask ? <span className="msg-badge task">업무</span> : <span className="msg-badge notice">전달</span>}
+                        <span className="log-time">{fmtMsgTime(it.createdAt)}</span>
+                      </div>
+                      <div className="log-body">{it.body}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })
+    )
+  );
 
   return (
     <div className="msg-wrap">
-      <div className="msg-tabs">
-        <button className={view === "inbox" ? "msg-tab on" : "msg-tab"} onClick={() => { setView("inbox"); setOpenId(null); }}>
-          받은쪽지{inboxPendingCount > 0 ? <span className="msg-tab-badge">{inboxPendingCount}</span> : null}
-        </button>
-        <button className={view === "sent" ? "msg-tab on" : "msg-tab"} onClick={() => { setView("sent"); setOpenId(null); }}>
-          보낸쪽지{sentPendingCount > 0 ? <span className="msg-tab-badge">{sentPendingCount}</span> : null}
-        </button>
-        <button className={view === "compose" ? "msg-tab on" : "msg-tab"} onClick={() => setView("compose")}>+ 작성</button>
+      <div className="msg-top">
+        <button className="msg-compose-btn" onClick={() => setComposing(true)}>✉ 쪽지 작성</button>
+        <button className="cal-gear-btn" onClick={() => { setShowSettings(true); setSettingsView("trash"); }} title="휴지통 · 기록">⚙</button>
       </div>
 
-      {view === "compose" && (
-        <Compose staff={staff} myId={myId} onSend={async (p) => { await onSend(p); setView("sent"); }} />
+      <div className="sec-label msg-sec">받은 쪽지{inboxPendingCount > 0 ? <span className="sec-cnt">{inboxPendingCount}</span> : null}</div>
+      {inbox.length === 0 ? <div className="empty">받은 쪽지 없음</div> : (
+        <>
+          {inboxShown.map(renderInboxItem)}
+          {inbox.length > MSG_PAGE && (
+            <button className="more-btn" onClick={() => setInboxAll((s) => !s)}>
+              {inboxAll ? "접기" : `더보기 (${inbox.length - MSG_PAGE}개 더)`}
+            </button>
+          )}
+        </>
       )}
 
-      {view === "inbox" && (
-        inbox.length === 0 ? <div className="empty">받은 쪽지 없음</div> :
-          inboxShown.map((m) => {
-            const isTask = !!m.isTask;
-            const read = !!(m.reads && m.reads[myId]);
-            const done = !!(m.done && m.done[myId]);
-            // 미처리 판정: 단순전달=확인 안함 / 업무=처리완료 안함
-            const pending = isTask ? !done : !read;
-            const stage = inboxStageOf(m, myId);
-            const open = openId === m.id;
-            return (
-              <div className="msg-item" key={m.id}>
-                <div className="msg-head" onClick={() => openInbox(m)}>
-                  {pending ? <span className="msg-unread" /> : <span className="msg-unread off" />}
-                  <span className="msg-from">{nameOf(m.fromId)}</span>
-                  {isTask
-                    ? <span className="msg-badge task">업무</span>
-                    : <span className="msg-badge notice">전달</span>}
-                  {stage.label && <span className={"msg-badge " + stage.cls}>{stage.label}</span>}
-                  <span className="msg-preview">{m.body}</span>
-                  <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
-                </div>
-                {open && (
-                  <div className="msg-body">
-                    <div className="msg-text">{m.body}</div>
-                    {/* 확인/처리 단계 버튼 */}
-                    {isTask ? (
-                      done ? (
-                        <span className="memo-saved">처리완료했어요 ✓ ({fmtMsgTime(m.done[myId])})</span>
-                      ) : read ? (
-                        <div className="msg-step">
-                          <span className="memo-saved">확인함 ✓ ({fmtMsgTime(m.reads[myId])})</span>
-                          <button className="nv-btn primary" onClick={() => onMarkDone(m.id)}>처리완료</button>
-                        </div>
-                      ) : (
-                        <button className="nv-btn primary" onClick={() => onMarkRead(m.id)}>확인함</button>
-                      )
-                    ) : (
-                      read
-                        ? <span className="memo-saved">확인했어요 ✓ ({fmtMsgTime(m.reads[myId])})</span>
-                        : <button className="nv-btn primary" onClick={() => onMarkRead(m.id)}>확인</button>
-                    )}
+      <div className="sec-label msg-sec">보낸 쪽지{sentPendingCount > 0 ? <span className="sec-cnt">{sentPendingCount}</span> : null}</div>
+      {sent.length === 0 ? <div className="empty">보낸 쪽지 없음</div> : (
+        <>
+          {sentShown.map(renderSentItem)}
+          {sent.length > MSG_PAGE && (
+            <button className="more-btn" onClick={() => setSentAll((s) => !s)}>
+              {sentAll ? "접기" : `더보기 (${sent.length - MSG_PAGE}개 더)`}
+            </button>
+          )}
+        </>
+      )}
 
-                    {/* 해야할일 등록 */}
-                    {todoForId === m.id ? (
-                      <div className="msg-todo-form">
-                        <div className="af-color-label">해야할일 등록</div>
-                        <input className="af-input" placeholder="할 일 제목" value={tTitle} onChange={(e) => setTTitle(e.target.value)} />
-                        <textarea className="af-memo" placeholder="내용 (선택)" value={tBody} onChange={(e) => setTBody(e.target.value)} />
-                        <div className="af-btns">
-                          <button className="nv-btn primary" onClick={submitTodo} disabled={!tTitle.trim()}>등록</button>
-                          <button className="nv-btn" onClick={() => { setTodoForId(null); setTTitle(""); setTBody(""); }}>취소</button>
-                        </div>
-                      </div>
-                    ) : todoDone === m.id ? (
-                      <span className="memo-saved">해야할일에 등록됐어요 ✓ (내 사건 탭에서 확인)</span>
-                    ) : (
-                      <button className="msg-todo-btn" onClick={() => openTodoForm(m)}>+ 해야할일 등록</button>
-                    )}
-                  </div>
-                )}
+      {composing && (
+        <div className="wg-modal-overlay" onClick={() => setComposing(false)}>
+          <div className="wg-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="wg-modal-head">
+              <span className="wg-modal-title">쪽지 작성</span>
+              <button className="wg-modal-x static" onClick={() => setComposing(false)} title="닫기">✕</button>
+            </div>
+            <div className="wg-modal-body">
+              <Compose staff={staff} myId={myId} onSend={async (p) => { await onSend(p); setComposing(false); }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="wg-modal-overlay" onClick={closeSettings}>
+          <div className="wg-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="wg-modal-head">
+              <span className="wg-modal-title">{isAdmin ? "휴지통 · 기록" : "휴지통"}</span>
+              <button className="wg-modal-x static" onClick={closeSettings} title="닫기">✕</button>
+            </div>
+            {isAdmin && (
+              <div className="msg-sub-toggle">
+                <button className={settingsView === "trash" ? "on" : ""} onClick={() => setSettingsView("trash")}>휴지통{trash.length > 0 ? ` (${trash.length})` : ""}</button>
+                <button className={settingsView === "logs" ? "on" : ""} onClick={() => setSettingsView("logs")}>비우기 기록</button>
               </div>
-            );
-          })
-      )}
-      {view === "inbox" && inbox.length > MSG_PAGE && (
-        <button className="more-btn" onClick={() => setInboxAll((s) => !s)}>
-          {inboxAll ? "접기" : `더보기 (${inbox.length - MSG_PAGE}개 더)`}
-        </button>
-      )}
-
-      {view === "sent" && (
-        sent.length === 0 ? <div className="empty">보낸 쪽지 없음</div> :
-          sentShown.map((m) => {
-            const isTask = !!m.isTask;
-            const open = openId === m.id;
-            const st = sentStatusOf(m);
-            // 상대가 한 명이라도 '확인함'을 눌렀으면 삭제 불가
-            const anyRead = (m.toIds || []).some((id) => m.reads && m.reads[id]);
-            return (
-              <div className="msg-item" key={m.id}>
-                <div className="msg-head" onClick={() => setOpenId(open ? null : m.id)}>
-                  <span className="msg-from">→ {(m.toIds || []).map(nameOf).join(", ")}</span>
-                  {isTask
-                    ? <span className="msg-badge task">업무</span>
-                    : <span className="msg-badge notice">전달</span>}
-                  {st.label && <span className={"msg-badge " + st.cls}>{st.label}</span>}
-                  <span className="msg-preview">{m.body}</span>
-                  <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
-                </div>
-                {open && (
-                  <div className="msg-body">
-                    <div className="msg-text">{m.body}</div>
-                    <div className="msg-status">
-                      {(m.toIds || []).map((tid) => {
-                        const done = m.done && m.done[tid];
-                        const read = m.reads && m.reads[tid];
-                        // 업무 요청: 처리완료/확인함/미확인 · 단순 전달: 확인함/미확인
-                        const stateLabel = isTask
-                          ? (done ? "처리완료" : read ? "확인함" : "미확인")
-                          : (read ? "확인함" : "미확인");
-                        const stateCls = (isTask ? (done ? "done" : read ? "read" : "") : (read ? "done" : ""));
-                        return (
-                          <div className="msg-stat-row" key={tid}>
-                            <span className="msg-stat-name">{nameOf(tid)}</span>
-                            <span className={"msg-stat " + stateCls}>{stateLabel}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {anyRead ? (
-                      <span className="msg-del-locked">상대가 확인하여 삭제할 수 없어요</span>
-                    ) : delId === m.id ? (
-                      <span className="ev-del-wrap">
-                        <button className="ev-del yes" onClick={() => { onDeleteMessage(m.id); setDelId(null); }}>삭제</button>
-                        <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
-                      </span>
-                    ) : (
-                      <button className="msg-del" onClick={() => setDelId(m.id)}>쪽지 삭제</button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })
-      )}
-      {view === "sent" && sent.length > MSG_PAGE && (
-        <button className="more-btn" onClick={() => setSentAll((s) => !s)}>
-          {sentAll ? "접기" : `더보기 (${sent.length - MSG_PAGE}개 더)`}
-        </button>
+            )}
+            <div className="wg-modal-body">
+              {(!isAdmin || settingsView === "trash") ? trashPanel : logsPanel}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1475,7 +1596,28 @@ function Panel({ title, sum, scope, favCases, onToggleFav, staffName, collapsibl
 }
 
 /* ===== 해야할일 (개인용, 계정별) ===== */
-function TodoRow({ t, onToggle, onDelete, delId, setDelId, expanded, onToggleExpand }) {
+function TodoRow({ t, onToggle, onDelete, onEdit, delId, setDelId, expanded, onToggleExpand }) {
+  const [editing, setEditing] = useState(false);
+  const [eTitle, setETitle] = useState(t.title);
+  const [eBody, setEBody] = useState(t.body || "");
+  const startEdit = () => { setETitle(t.title); setEBody(t.body || ""); setEditing(true); };
+  const saveEdit = async () => { if (!eTitle.trim()) return; await onEdit(t.id, { title: eTitle, body: eBody }); setEditing(false); };
+
+  if (editing) {
+    return (
+      <div className="todo-row editing">
+        <div className="todo-edit-form">
+          <input className="af-input" placeholder="할 일 제목" value={eTitle} onChange={(e) => setETitle(e.target.value)} />
+          <textarea className="af-memo" placeholder="내용 (선택)" value={eBody} onChange={(e) => setEBody(e.target.value)} />
+          <div className="af-btns">
+            <button className="nv-btn primary" onClick={saveEdit} disabled={!eTitle.trim()}>저장</button>
+            <button className="nv-btn" onClick={() => setEditing(false)}>취소</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={"todo-row" + (t.done ? " done" : "")}>
       <button className="todo-check" onClick={() => onToggle(t.id)} title={t.done ? "완료 해제" : "완료"}>{t.done ? "☑" : "☐"}</button>
@@ -1486,19 +1628,22 @@ function TodoRow({ t, onToggle, onDelete, delId, setDelId, expanded, onToggleExp
         </div>
         {expanded && t.body && <div className="todo-body">{t.body}</div>}
       </div>
-      {delId === t.id ? (
-        <span className="ev-del-wrap">
-          <button className="ev-del yes" onClick={() => { onDelete(t.id); setDelId(null); }}>삭제</button>
-          <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
-        </span>
-      ) : (
-        <button className="todo-del" onClick={() => setDelId(t.id)} title="삭제">✕</button>
-      )}
+      <div className="todo-actions">
+        <button className="todo-edit" onClick={startEdit} title="수정">✎</button>
+        {delId === t.id ? (
+          <span className="ev-del-wrap">
+            <button className="ev-del yes" onClick={() => { onDelete(t.id); setDelId(null); }}>삭제</button>
+            <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
+          </span>
+        ) : (
+          <button className="todo-del" onClick={() => setDelId(t.id)} title="삭제">✕</button>
+        )}
+      </div>
     </div>
   );
 }
 
-function TodoPanel({ todos, onAdd, onToggle, onDelete }) {
+function TodoPanel({ todos, onAdd, onToggle, onEdit, onDelete }) {
   const [showAdd, setShowAdd] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -1534,12 +1679,12 @@ function TodoPanel({ todos, onAdd, onToggle, onDelete }) {
       ) : (
         <>
           {undone.map((t) => (
-            <TodoRow key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} delId={delId} setDelId={setDelId}
+            <TodoRow key={t.id} t={t} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} delId={delId} setDelId={setDelId}
               expanded={expandedId === t.id} onToggleExpand={toggleExpand} />
           ))}
           {doneList.length > 0 && <div className="todo-done-label">완료됨 ({doneList.length})</div>}
           {doneList.map((t) => (
-            <TodoRow key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} delId={delId} setDelId={setDelId}
+            <TodoRow key={t.id} t={t} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} delId={delId} setDelId={setDelId}
               expanded={expandedId === t.id} onToggleExpand={toggleExpand} />
           ))}
         </>
@@ -1560,6 +1705,7 @@ function App() {
   const [favCases, setFavCases] = useState([]);       // office_config/fav_<myId>
   const [todos, setTodos] = useState([]);             // office_config/todos_<myId>
   const [calSeen, setCalSeen] = useState(null);       // office_config/calseen_<myId> {baseline, ids}
+  const [trashLogs, setTrashLogs] = useState([]);     // office_trashlogs (관리자만 조회)
   const [loadingData, setLoadingData] = useState(false);
 
   const [tab, setTab] = useState("cases");
@@ -1679,6 +1825,42 @@ function App() {
   const markRead = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["reads." + myId]: Date.now() }); } catch (e) {} };
   const markDone = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["done." + myId]: Date.now() }); } catch (e) {} };
   const deleteMessage = async (id) => { try { await deleteDoc(doc(db, "office_messages", id)); } catch (e) {} };
+  // 보내기 취소 (수신자 확인 전) = 수신자에게서도 사라짐 + 내 휴지통으로
+  const unsendMessage = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { unsent: true, ["trashedBy." + myId]: Date.now() }); } catch (e) {} };
+  // 휴지통으로 이동 = 내 화면에서만 숨김 (보낸쪽지 정리 / 받은쪽지 정리). 상대 화면엔 영향 없음
+  const trashMine = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["trashedBy." + myId]: Date.now() }); } catch (e) {} };
+  // 휴지통 비우기 = 내 휴지통 영구 비움 + 관리자용 기록. (모두 비운 쪽지는 실제 삭제)
+  const emptyTrash = async () => {
+    const mine = (messages || []).filter((m) => msgInTrash(m, myId));
+    if (mine.length === 0) return;
+    // 관리자 기록 저장 — 실패(규칙 미설정 등)해도 비우기는 진행되도록 별도 처리
+    try {
+      await addDoc(collection(db, "office_trashlogs"), {
+        byId: myId,
+        byName: profile?.name || user?.email || "",
+        at: Date.now(),
+        count: mine.length,
+        items: mine.map((m) => ({ fromId: m.fromId || "", toIds: m.toIds || [], body: m.body || "", isTask: !!m.isTask, createdAt: m.createdAt || 0 })),
+      });
+    } catch (e) {}
+    // 실제 비우기
+    try {
+      const now = Date.now();
+      for (let i = 0; i < mine.length; i += 300) {
+        const batch = writeBatch(db);
+        mine.slice(i, i + 300).forEach((m) => {
+          const ref = doc(db, "office_messages", m.id);
+          const pb = { ...(m.purgedBy || {}), [myId]: now };
+          const parties = m.unsent ? [m.fromId] : Array.from(new Set([m.fromId, ...(m.toIds || [])])).filter(Boolean);
+          const allPurged = parties.every((p) => pb[p]);
+          const legacy = m.trashed && !m.trashedBy;
+          if (allPurged || legacy) batch.delete(ref);
+          else batch.update(ref, { ["purgedBy." + myId]: now });
+        });
+        await batch.commit();
+      }
+    } catch (e) {}
+  };
 
   const saveColorRules = async (rules) => {
     setColorRules(rules);
@@ -1703,6 +1885,11 @@ function App() {
   };
   const toggleTodo = async (id) => {
     const next = (todos || []).map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+    setTodos(next);
+    await persistTodos(next);
+  };
+  const editTodo = async (id, { title, body }) => {
+    const next = (todos || []).map((t) => (t.id === id ? { ...t, title: (title || "").trim(), body: (body || "").trim() } : t));
     setTodos(next);
     await persistTodos(next);
   };
@@ -1764,6 +1951,17 @@ function App() {
     return unsub;
   }, [user, profile]);
 
+  // 실시간: 휴지통 비우기 기록 (관리자만)
+  useEffect(() => {
+    if (!user || !profile) return;
+    if ((profile?.role || "member") !== "admin") { setTrashLogs([]); return; }
+    const unsub = onSnapshot(collection(db, "office_trashlogs"), (snap) => {
+      const arr = []; snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+      setTrashLogs(arr);
+    }, () => {});
+    return unsub;
+  }, [user, profile]);
+
   useEffect(() => {
     if (!user || !profile) return;
     const doCheck = async () => {
@@ -1793,6 +1991,7 @@ function App() {
 
   const unreadCount = useMemo(
     () => (messages || []).filter((m) => {
+      if (msgHiddenInbox(m, myId)) return false;
       if (!(Array.isArray(m.toIds) && m.toIds.includes(myId))) return false;
       // 단순 전달=확인(reads) 안했으면 미처리 / 업무 요청=처리완료(done) 안했으면 미처리
       return m.isTask ? !(m.done && m.done[myId]) : !(m.reads && m.reads[myId]);
@@ -2035,7 +2234,7 @@ function App() {
             <div className="empty" style={{ marginTop: 30 }}>사건 불러오는 중...</div>
           ) : (
             <>
-              <TodoPanel todos={todos} onAdd={addTodo} onToggle={toggleTodo} onDelete={deleteTodo} />
+              <TodoPanel todos={todos} onAdd={addTodo} onToggle={toggleTodo} onEdit={editTodo} onDelete={deleteTodo} />
               <Panel title={isLeader ? "내 담당" : null} sum={mySum} scope={isLeader ? "own" : ""}
                 favCases={favCases} onToggleFav={toggleFav} staffName={staffName} />
               {isLeader && teamSum && (
@@ -2074,7 +2273,11 @@ function App() {
             onSend={sendMessage}
             onMarkRead={markRead}
             onMarkDone={markDone}
-            onDeleteMessage={deleteMessage}
+            onUnsend={unsendMessage}
+            onTrashMine={trashMine}
+            onEmptyTrash={emptyTrash}
+            trashLogs={trashLogs}
+            isAdmin={myRole === "admin"}
             onAddTodo={addTodo}
           />
         )}

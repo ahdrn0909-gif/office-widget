@@ -594,7 +594,7 @@ body {
 }
 .cal-wd {
   text-align: center;
-  font-size: clamp(9px, 1.25vw, 12px);
+  font-size: clamp(10px, 1.55vw, 13px);
   color: #9a9aa0;
   padding: 2px 0;
 }
@@ -607,7 +607,7 @@ body {
   gap: 1px;
 }
 .cal-cell {
-  min-height: clamp(44px, 8.5vw, 84px);
+  min-height: clamp(64px, 12vw, 100px);
   padding: 4px 3px;
   display: flex;
   flex-direction: column;
@@ -624,7 +624,7 @@ body {
 .cal-cell.today { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.38); }
 
 .cal-day {
-  font-size: clamp(11px, 1.55vw, 15px);
+  font-size: clamp(12.5px, 2vw, 16px);
   color: #e2e2e6;
   line-height: 1.35;
   text-align: center;
@@ -633,14 +633,14 @@ body {
 .cal-day.sat { color: #6db3ff; }
 
 .cal-lu {
-  font-size: clamp(6.5px, 0.9vw, 8.5px);
+  font-size: clamp(7.5px, 1.15vw, 9.5px);
   color: #85858b;
   line-height: 1.05;
   text-align: center;
 }
 
 .cal-hol {
-  font-size: clamp(8px, 1.1vw, 10.5px);
+  font-size: clamp(9px, 1.45vw, 11.5px);
   color: #ff8a82;
   line-height: 1.15;
   max-width: 100%;
@@ -659,7 +659,7 @@ body {
   width: 100%;
 }
 .ev-chip {
-  font-size: clamp(8.5px, 1.25vw, 12px);
+  font-size: clamp(10px, 1.6vw, 13px);
   line-height: 1.35;
   border-radius: 4px;
   padding: 1px 5px;
@@ -691,7 +691,7 @@ body {
   white-space: nowrap;
 }
 .ev-more {
-  font-size: clamp(8px, 1.15vw, 11px);
+  font-size: clamp(9px, 1.3vw, 11.5px);
   color: #9a9aa0;
   padding-left: 4px;
   line-height: 1.2;
@@ -1553,3 +1553,158 @@ body {
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
+
+/* ========================================================= */
+/* ↓↓↓ v0.1.7 추가분 3 (휴지통 + 관리자 비우기 기록) ↓↓↓ */
+/* ========================================================= */
+
+/* 탭이 4~5개로 늘어나 살짝 촘촘하게 */
+.msg-tab { font-size: 11.5px; padding: 6px 2px; }
+.msg-tab-badge.gray { background: #6b6b70; }
+
+/* 휴지통 상단 바 */
+.trash-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 4px;
+}
+.trash-info { font-size: 12.5px; color: #c5c5c7; font-weight: 600; }
+.trash-head .ev-del-wrap { margin-left: auto; }
+.trash-empty-btn {
+  margin-left: auto;
+  border: none;
+  background: rgba(255,80,72,0.18);
+  color: #ff6961;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.trash-empty-btn:hover { background: rgba(255,80,72,0.3); color: #ff8a82; }
+.trash-warn {
+  font-size: 11px;
+  color: #ffb0ab;
+  padding: 2px 2px 8px;
+  line-height: 1.4;
+}
+
+/* 관리자 기록 상세 */
+.log-item {
+  padding: 6px 4px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.log-line { display: flex; align-items: center; gap: 6px; }
+.log-to {
+  font-size: 12.5px;
+  color: #e2e2e6;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-time { font-size: 11px; color: #8e8e93; flex-shrink: 0; }
+.log-body {
+  font-size: 12.5px;
+  color: #a0a0a6;
+  margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+/* ========================================================= */
+/* ↓↓↓ v0.1.7 추가분 4 (쪽지 섹션형 레이아웃 + 설정버튼) ↓↓↓ */
+/* ========================================================= */
+
+/* 상단: 쪽지 작성 + 설정(휴지통/기록) */
+.msg-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.msg-compose-btn {
+  flex: 1;
+  border: none;
+  background: rgba(10,132,255,0.9);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.msg-compose-btn:hover { background: #0a84ff; }
+.msg-top .cal-gear-btn { height: 33px; width: 34px; margin-left: 0; }
+
+/* 섹션 제목(받은/보낸)에 붙는 미확인 카운트 */
+.msg-sec { display: flex; align-items: center; gap: 7px; }
+.sec-cnt {
+  min-width: 17px;
+  height: 17px;
+  line-height: 17px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #fff;
+  background: #ff453a;
+  border-radius: 9px;
+  text-align: center;
+}
+
+/* 설정 모달 안 휴지통/기록 전환 토글 */
+.msg-sub-toggle {
+  display: flex;
+  gap: 2px;
+  background: rgba(255,255,255,0.06);
+  padding: 2px;
+  border-radius: 9px;
+  margin-bottom: 8px;
+}
+.msg-sub-toggle button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #9a9aa0;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.msg-sub-toggle button:hover { color: #d8d8dc; }
+.msg-sub-toggle button.on { background: rgba(255,255,255,0.92); color: #1c1c1e; font-weight: 600; }
+
+/* v0.1.7: 확인된 쪽지 - 안내 + 휴지통 이동 버튼 세로 배치 */
+.msg-locked-row { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+
+/* v0.1.7: 할일 수정 버튼 + 휴지통 방향 뱃지 */
+.todo-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.todo-edit {
+  border: none;
+  background: transparent;
+  color: #6f6f74;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.todo-edit:hover { color: #4da3ff; background: rgba(255,255,255,0.08); }
+.todo-row.editing { padding: 4px 2px; }
+.todo-edit-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 9px;
+  padding: 9px;
+}
+.todo-edit-form .af-input, .todo-edit-form .af-memo { width: 100%; }
+
+/* 휴지통 방향(받은/보낸) 뱃지 */
+.msg-badge.gray-badge { background: rgba(255,255,255,0.12); color: #b8b8bd; }
