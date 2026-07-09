@@ -11,7 +11,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { doc, getDoc, collection, getDocs, writeBatch, addDoc, deleteDoc, updateDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, writeBatch, addDoc, deleteDoc, updateDoc, setDoc, onSnapshot } from "firebase/firestore";
 import KoreanLunarCalendarPkg from "korean-lunar-calendar";
 import { auth, db } from "./firebase";
 import "./App.css";
@@ -136,6 +136,32 @@ function autoColorFor(visibility, sharedWith, rules) {
     return r ? r.color : null;
   }
   return null;
+}
+
+// 특정 사람(personId)을 포함하는 색상규칙 찾기 (정확히 그 사람만인 규칙 우선, 없으면 포함하는 규칙)
+function matchSharedRuleByPerson(sharedRules, personId) {
+  if (!Array.isArray(sharedRules) || !personId) return null;
+  const exact = sharedRules.find((r) => (r.ids || []).length === 1 && r.ids[0] === personId);
+  if (exact) return exact.color;
+  const contains = sharedRules.find((r) => (r.ids || []).includes(personId));
+  return contains ? contains.color : null;
+}
+
+// 일정을 '보는 사람(viewerId)' 기준으로 색상 결정 — 각 계정의 색상설정이 각자 적용됨
+// - 내가 만든 일정: 내가 설정한 공유대상별 색
+// - 남이 나에게 공유한 일정: 공유해준 사람(owner)에 대해 내가 설정한 색 (내 화면 = 내 규칙)
+function scheduleColor(s, viewerId, rules) {
+  const vis = s.visibility || "private";
+  const fallback = SCHED_COLORS[vis] || SCHED_COLORS.private;
+  if (!rules) return s.color || fallback;
+  if (s.ownerId === viewerId) {
+    const c = autoColorFor(vis, s.sharedWith, rules);
+    return c || fallback;
+  }
+  if (vis === "office") return rules.office || fallback;
+  if (vis === "team") return rules.team || fallback;
+  const c = matchSharedRuleByPerson(rules.sharedRules, s.ownerId);
+  return c || fallback;
 }
 
 /* ===== 공휴일·대체공휴일 (2025~2027, 인사혁신처 기준) ===== */
@@ -322,12 +348,24 @@ function parseICS(text) {
 /* ===== 색상 팔레트 (네이버처럼 그룹별 색 지정) ===== */
 const PALETTE = ["#bf5af2", "#0a84ff", "#64d2ff", "#30d158", "#40c8b0", "#ff9f0a", "#ff6482", "#ff5c52", "#ffd60a", "#7d7cff", "#ac8e68", "#98989d"];
 function ColorPicker({ color, setColor }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="color-picker">
-      {PALETTE.map((c) => (
-        <button key={c} type="button" className={"color-sw" + (color === c ? " on" : "")}
-          style={{ background: c }} onClick={() => setColor(c)} title={c} />
-      ))}
+    <div className="color-dd">
+      <button type="button" className="color-dd-trigger" onClick={() => setOpen((o) => !o)}>
+        <span className="color-dd-sw" style={{ background: color }} />
+        <span className="color-dd-chev">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          <div className="color-dd-backdrop" onClick={() => setOpen(false)} />
+          <div className="color-dd-pop">
+            {PALETTE.map((c) => (
+              <button key={c} type="button" className={"color-sw" + (color === c ? " on" : "")}
+                style={{ background: c }} onClick={() => { setColor(c); setOpen(false); }} title={c} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -439,7 +477,7 @@ function ColorSettings({ staff, myId, colorRules, onSave }) {
       <button className="nv-toggle" onClick={() => setOpen((o) => !o)}>색상 설정 {open ? "▴" : "▾"}</button>
       {open && (
         <div className="nv-box">
-          <div className="cs-help">공유 대상별로 색을 정해두면, 일정 만들 때 자동으로 그 색이 적용돼요. (그래도 수동 변경 가능)</div>
+          <div className="cs-help">여기서 정한 색으로 <b>내 캘린더</b>에 일정이 표시돼요. 남이 나에게 공유한 일정도, 그 사람에 대해 내가 정한 색으로 보여요. (각자 자기 색 설정이 적용됩니다)</div>
           <div className="cs-row"><span className="cs-name">개인일정</span><ColorPicker color={rules.private} setColor={(c) => setField("private", c)} /></div>
           <div className="cs-row"><span className="cs-name">회사전체</span><ColorPicker color={rules.office} setColor={(c) => setField("office", c)} /></div>
           <div className="cs-row"><span className="cs-name">소속팀원</span><ColorPicker color={rules.team} setColor={(c) => setField("team", c)} /></div>
@@ -555,18 +593,9 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
   const [time, setTime] = useState(init.time || "09:00");
   const [repeat, setRepeat] = useState(init.repeat || "none");
   const [memo, setMemo] = useState(init.memo || "");
-  const [color, setColor] = useState(init.color || "#0a84ff");
   const [v, setV] = useState({ visibility: init.visibility || "private", sharedWith: init.sharedWith || [], team: init.team || myTeam || "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const skipAutoColor = useRef(!!editDoc);
-
-  // 공유 대상이 바뀌면 저장된 색상 규칙에 따라 색 자동 지정 (수정 진입 시 첫 회는 기존 색 유지)
-  useEffect(() => {
-    if (skipAutoColor.current) { skipAutoColor.current = false; return; }
-    const c = autoColorFor(v.visibility, v.sharedWith, colorRules);
-    if (c) setColor(c);
-  }, [v.visibility, v.sharedWith]);
 
   const onStartChange = (val) => { setD(val); if (endD < val) setEndD(val); };
 
@@ -590,7 +619,6 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
       lunarDay: lunarInfo ? lunarInfo.day : null,
       lunarLeap: lunarInfo ? !!lunarInfo.leap : false,
       memo: memo.trim(),
-      color,
       visibility: v.visibility,
       team: v.visibility === "team" ? (v.team || myTeam) : "",
       sharedWith: resolveSharedWith(v, staff, myTeam),
@@ -639,8 +667,6 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
         const lu = solarToLunar(d);
         return <div className="af-hint">{lu ? `매년 음력 ${lu.month}월 ${lu.day}일${lu.leap ? " (윤달)" : ""}에 반복돼요` : "이 날짜는 음력 변환 범위를 벗어났어요"}</div>;
       })()}
-      <div className="af-color-label">색상</div>
-      <ColorPicker color={color} setColor={setColor} />
       <textarea className="af-memo" placeholder="비고 (세부 내용, 선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
       {err && <div className="af-err">{err}</div>}
       <div className="af-btns">
@@ -661,7 +687,6 @@ function NaverImport({ myId, staff, myTeam, onReload }) {
   const [status, setStatus] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
   const [v, setV] = useState({ visibility: "private", sharedWith: [], team: myTeam || "" });
-  const [color, setColor] = useState("#bf5af2");
 
   const analyze = () => {
     setStatus("");
@@ -730,7 +755,6 @@ function NaverImport({ myId, staff, myTeam, onReload }) {
             time: ev.time,
             location: ev.location,
             memo: ev.memo || "",
-            color,
             repeat: ev.repeat || "none",
             visibility: v.visibility,
             team: v.visibility === "team" ? (v.team || myTeam) : "",
@@ -802,8 +826,6 @@ function NaverImport({ myId, staff, myTeam, onReload }) {
           <div className="nv-vis-label">이 파일의 공유 대상</div>
           <VisTypeSelect v={v} setV={setV} />
           <VisDetail v={v} setV={setV} staff={staff} myId={myId} myTeam={myTeam} />
-          <div className="nv-vis-label">색상</div>
-          <ColorPicker color={color} setColor={setColor} />
           <div className="nv-row">
             <button className="nv-btn" onClick={analyze} disabled={busy || !text.trim()}>분석</button>
             {parsed && parsed.length > 0 && (
@@ -844,18 +866,30 @@ function NaverImport({ myId, staff, myTeam, onReload }) {
 }
 
 /* ===== 캘린더 탭 ===== */
-function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorRules, onReload, onDeleteSchedule, onUpdateSchedule, onSaveColorRules }) {
+function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorRules, onReload, onDeleteSchedule, onUpdateSchedule, onSaveColorRules, newShared, onAckShared }) {
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
   const [sel, setSel] = useState(dateStr(now));
   const [showForm, setShowForm] = useState(false);
   const [editDoc, setEditDoc] = useState(null);
+  const [formDate, setFormDate] = useState(dateStr(now));
   const [delId, setDelId] = useState(null);
   const [expId, setExpId] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
 
-  const openAdd = () => { setEditDoc(null); setShowForm((s) => !s); };
+  const ownerNameOf = (id) => ((staff || []).find((s) => s.id === id)?.name) || "누군가";
+  const openAdd = () => { setEditDoc(null); setFormDate(sel); setShowForm(true); };
+  // 날짜 칸 더블클릭 → 그 날짜로 일정추가 폼 열기
+  const openAddAt = (ds) => { setSel(ds); setEditDoc(null); setFormDate(ds); setShowForm(true); };
   const openEdit = (id) => { const docv = schedulesById[id]; if (docv) { setEditDoc(docv); setShowForm(true); } };
   const closeForm = () => { setShowForm(false); setEditDoc(null); };
+  // 새 공유 알림 항목 클릭 → 해당 날짜로 이동
+  const goToShared = (s) => {
+    if (!s.date) return;
+    const p = s.date.split("-").map(Number);
+    setYm({ y: p[0], m: p[1] - 1 });
+    setSel(s.date);
+  };
 
   const { y, m } = ym;
   const prevMonth = () => setYm((p) => (p.m === 0 ? { y: p.y - 1, m: 11 } : { y: p.y, m: p.m - 1 }));
@@ -879,6 +913,28 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
 
   return (
     <div className="cal-wrap">
+      {newShared && newShared.length > 0 && (
+        <div className="cal-newshare">
+          <div className="cal-newshare-head">
+            <span className="cns-head-title">🔔 새로 공유된 일정 {newShared.length}</span>
+            <button className="cal-add-btn" onClick={() => onAckShared(newShared.map((s) => s.id))}>모두 확인</button>
+          </div>
+          {newShared.map((s) => (
+            <div className="cal-newshare-item" key={s.id}>
+              <span className="cns-dot" style={{ background: scheduleColor(s, myId, colorRules) }} />
+              <span className="cns-main" onClick={() => goToShared(s)}>
+                <span className="cns-title">{s.title || "(제목 없음)"}</span>
+                <span className="cns-sub">
+                  {ownerNameOf(s.ownerId)} · {s.date}
+                  {s.endDate && s.endDate !== s.date ? " ~ " + s.endDate : ""}
+                  {!s.allDay && s.time ? " " + s.time : ""}
+                </span>
+              </span>
+              <button className="cns-ok" onClick={() => onAckShared([s.id])}>확인</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="cal-nav">
         <button className="cal-nav-btn" onClick={prevYear} title="이전 해">«</button>
         <button className="cal-nav-btn" onClick={prevMonth} title="이전 달">‹</button>
@@ -886,6 +942,7 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
         <button className="cal-nav-btn" onClick={nextMonth} title="다음 달">›</button>
         <button className="cal-nav-btn" onClick={nextYear} title="다음 해">»</button>
         <button className="cal-today-btn" onClick={goToday}>오늘</button>
+        <button className="cal-gear-btn" onClick={() => setShowSettings(true)} title="설정 (색상·네이버 가져오기)">⚙</button>
       </div>
 
       <div className="cal-weekdays">
@@ -906,7 +963,7 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
           const dayCls = "cal-day" + (hol || wd === 0 ? " holiday" : wd === 6 ? " sat" : "");
           const cellCls = "cal-cell" + (isSel ? " sel" : "") + (isToday ? " today" : "");
           return (
-            <div className={cellCls} key={i} onClick={() => setSel(ds)}>
+            <div className={cellCls} key={i} onClick={() => setSel(ds)} onDoubleClick={() => openAddAt(ds)} title="더블클릭하면 일정 추가">
               <span className={dayCls}>{d}</span>
               {(() => { const lu = solarToLunar(ds); return lu ? <span className="cal-lu">{lu.day === 1 ? `${lu.leap ? "윤" : ""}${lu.month}.1` : lu.day}</span> : null; })()}
               {hol && <span className="cal-hol">{hol}</span>}
@@ -934,15 +991,8 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
         <div className="cal-detail-head">
           <span className="cal-detail-date">{selLabel}</span>
           {selHoliday && <span className="cal-detail-hol">{selHoliday}</span>}
-          <button className="cal-add-btn" onClick={openAdd}>{showForm && !editDoc ? "닫기" : "+ 일정"}</button>
+          <button className="cal-add-btn" onClick={openAdd}>+ 일정</button>
         </div>
-        {showForm && (
-          <EventForm
-            date={sel} myId={myId} staff={staff} myTeam={myTeam} editDoc={editDoc} colorRules={colorRules}
-            onSaved={() => { closeForm(); if (onReload) onReload(); }}
-            onCancel={closeForm}
-          />
-        )}
         {selEvents.length === 0 ? (
           <div className="empty">일정 없음</div>
         ) : (
@@ -994,8 +1044,36 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
         )}
       </div>
 
-      <ColorSettings staff={staff} myId={myId} colorRules={colorRules} onSave={onSaveColorRules} />
-      <NaverImport myId={myId} staff={staff} myTeam={myTeam} onReload={onReload} />
+      {showForm && (
+        <div className="wg-modal-overlay" onClick={closeForm}>
+          <div className="wg-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="wg-modal-x" onClick={closeForm} title="닫기">✕</button>
+            <div className="wg-modal-body">
+              <EventForm
+                key={editDoc ? "edit-" + editDoc.id : "add-" + formDate}
+                date={editDoc ? editDoc.date : formDate} myId={myId} staff={staff} myTeam={myTeam} editDoc={editDoc} colorRules={colorRules}
+                onSaved={() => { closeForm(); if (onReload) onReload(); }}
+                onCancel={closeForm}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="wg-modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="wg-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="wg-modal-head">
+              <span className="wg-modal-title">설정</span>
+              <button className="wg-modal-x static" onClick={() => setShowSettings(false)} title="닫기">✕</button>
+            </div>
+            <div className="wg-modal-body">
+              <ColorSettings staff={staff} myId={myId} colorRules={colorRules} onSave={onSaveColorRules} />
+              <NaverImport myId={myId} staff={staff} myTeam={myTeam} onReload={onReload} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1061,24 +1139,108 @@ function Compose({ staff, myId, onSend }) {
   );
 }
 
+/* ===== 쪽지: 보낸쪽지 기본목록에 표시할 상태 요약 ===== */
+function sentStatusOf(m) {
+  const ids = Array.isArray(m.toIds) ? m.toIds : [];
+  const n = ids.length;
+  const reads = m.reads || {};
+  const done = m.done || {};
+  if (n === 0) return { label: "", cls: "" };
+  if (m.isTask) {
+    const doneCount = ids.filter((id) => done[id]).length;
+    const readCount = ids.filter((id) => reads[id]).length;
+    if (n === 1) {
+      if (done[ids[0]]) return { label: "처리완료", cls: "done" };
+      if (reads[ids[0]]) return { label: "확인함", cls: "read" };
+      return { label: "미확인", cls: "" };
+    }
+    if (doneCount === n) return { label: `처리완료 ${doneCount}/${n}`, cls: "done" };
+    if (doneCount > 0 || readCount > 0) return { label: `처리 ${doneCount}/${n}`, cls: "read" };
+    return { label: `처리 0/${n}`, cls: "" };
+  } else {
+    const readCount = ids.filter((id) => reads[id]).length;
+    if (n === 1) return reads[ids[0]] ? { label: "확인함", cls: "done" } : { label: "미확인", cls: "" };
+    if (readCount === n) return { label: `확인 ${readCount}/${n}`, cls: "done" };
+    if (readCount > 0) return { label: `확인 ${readCount}/${n}`, cls: "read" };
+    return { label: `확인 0/${n}`, cls: "" };
+  }
+}
+
+/* ===== 쪽지: 받은쪽지 기본목록에 표시할 내 처리 단계 ===== */
+function inboxStageOf(m, myId) {
+  const read = !!(m.reads && m.reads[myId]);
+  const done = !!(m.done && m.done[myId]);
+  if (m.isTask) {
+    if (done) return { label: "처리완료", cls: "done" };
+    if (read) return { label: "확인함", cls: "read" };
+    return { label: "", cls: "" };
+  }
+  return read ? { label: "확인함", cls: "done" } : { label: "", cls: "" };
+}
+
 /* ===== 쪽지 탭 ===== */
-function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onDeleteMessage }) {
+const MSG_PAGE = 7;
+function isInboxPending(m, myId) {
+  return m.isTask ? !(m.done && m.done[myId]) : !(m.reads && m.reads[myId]);
+}
+function isSentPending(m) {
+  const ids = Array.isArray(m.toIds) ? m.toIds : [];
+  if (ids.length === 0) return false;
+  if (m.isTask) return !ids.every((id) => m.done && m.done[id]);
+  return !ids.every((id) => m.reads && m.reads[id]);
+}
+function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onDeleteMessage, onAddTodo }) {
   const [view, setView] = useState("inbox");
   const [openId, setOpenId] = useState(null);
   const [delId, setDelId] = useState(null);
+  const [inboxAll, setInboxAll] = useState(false);
+  const [sentAll, setSentAll] = useState(false);
+  // 해야할일 등록 폼
+  const [todoForId, setTodoForId] = useState(null);
+  const [tTitle, setTTitle] = useState("");
+  const [tBody, setTBody] = useState("");
+  const [todoDone, setTodoDone] = useState(null); // 방금 등록 완료한 쪽지 id
   const nameOf = (id) => ((staff || []).find((s) => s.id === id)?.name) || id;
 
-  const inbox = (messages || []).filter((m) => Array.isArray(m.toIds) && m.toIds.includes(myId)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  const sent = (messages || []).filter((m) => m.fromId === myId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  // 미확인(미처리)을 위로, 그다음 최신순
+  const byPendingThenTime = (pendFn) => (a, b) => {
+    const pa = pendFn(a) ? 1 : 0, pb = pendFn(b) ? 1 : 0;
+    if (pa !== pb) return pb - pa;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  };
+  const inbox = (messages || []).filter((m) => Array.isArray(m.toIds) && m.toIds.includes(myId)).sort(byPendingThenTime((m) => isInboxPending(m, myId)));
+  const sent = (messages || []).filter((m) => m.fromId === myId).sort(byPendingThenTime(isSentPending));
+  const inboxPendingCount = inbox.filter((m) => isInboxPending(m, myId)).length;
+  const sentPendingCount = sent.filter(isSentPending).length;
+  const inboxShown = inboxAll ? inbox : inbox.slice(0, MSG_PAGE);
+  const sentShown = sentAll ? sent : sent.slice(0, MSG_PAGE);
 
   // 받은쪽지 펼치기: 열기만 해서는 자동 확인 처리하지 않음 (명시적 버튼으로만 처리)
   const openInbox = (m) => { setOpenId(openId !== m.id ? m.id : null); };
 
+  const openTodoForm = (m) => {
+    setTodoForId(m.id);
+    setTTitle("");
+    setTBody(m.body || "");
+    setTodoDone(null);
+  };
+  const submitTodo = async () => {
+    if (!tTitle.trim()) return;
+    await onAddTodo({ title: tTitle, body: tBody });
+    const doneFor = todoForId;
+    setTodoForId(null); setTTitle(""); setTBody("");
+    setTodoDone(doneFor);
+  };
+
   return (
     <div className="msg-wrap">
       <div className="msg-tabs">
-        <button className={view === "inbox" ? "msg-tab on" : "msg-tab"} onClick={() => { setView("inbox"); setOpenId(null); }}>받은쪽지</button>
-        <button className={view === "sent" ? "msg-tab on" : "msg-tab"} onClick={() => { setView("sent"); setOpenId(null); }}>보낸쪽지</button>
+        <button className={view === "inbox" ? "msg-tab on" : "msg-tab"} onClick={() => { setView("inbox"); setOpenId(null); }}>
+          받은쪽지{inboxPendingCount > 0 ? <span className="msg-tab-badge">{inboxPendingCount}</span> : null}
+        </button>
+        <button className={view === "sent" ? "msg-tab on" : "msg-tab"} onClick={() => { setView("sent"); setOpenId(null); }}>
+          보낸쪽지{sentPendingCount > 0 ? <span className="msg-tab-badge">{sentPendingCount}</span> : null}
+        </button>
         <button className={view === "compose" ? "msg-tab on" : "msg-tab"} onClick={() => setView("compose")}>+ 작성</button>
       </div>
 
@@ -1088,11 +1250,13 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
 
       {view === "inbox" && (
         inbox.length === 0 ? <div className="empty">받은 쪽지 없음</div> :
-          inbox.map((m) => {
+          inboxShown.map((m) => {
             const isTask = !!m.isTask;
-            // 단순 전달: reads 로 확인 여부 판단 / 업무 요청: done 으로 완료 여부 판단
-            const confirmed = isTask ? !!(m.done && m.done[myId]) : !!(m.reads && m.reads[myId]);
-            const pending = !confirmed;
+            const read = !!(m.reads && m.reads[myId]);
+            const done = !!(m.done && m.done[myId]);
+            // 미처리 판정: 단순전달=확인 안함 / 업무=처리완료 안함
+            const pending = isTask ? !done : !read;
+            const stage = inboxStageOf(m, myId);
             const open = openId === m.id;
             return (
               <div className="msg-item" key={m.id}>
@@ -1102,21 +1266,46 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
                   {isTask
                     ? <span className="msg-badge task">업무</span>
                     : <span className="msg-badge notice">전달</span>}
-                  {confirmed && <span className="msg-badge done">{isTask ? "처리완료" : "확인함"}</span>}
+                  {stage.label && <span className={"msg-badge " + stage.cls}>{stage.label}</span>}
                   <span className="msg-preview">{m.body}</span>
                   <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
                 </div>
                 {open && (
                   <div className="msg-body">
                     <div className="msg-text">{m.body}</div>
+                    {/* 확인/처리 단계 버튼 */}
                     {isTask ? (
-                      confirmed
-                        ? <span className="memo-saved">처리완료했어요 ✓ ({fmtMsgTime(m.done[myId])})</span>
-                        : <button className="nv-btn primary" onClick={() => onMarkDone(m.id)}>처리완료</button>
+                      done ? (
+                        <span className="memo-saved">처리완료했어요 ✓ ({fmtMsgTime(m.done[myId])})</span>
+                      ) : read ? (
+                        <div className="msg-step">
+                          <span className="memo-saved">확인함 ✓ ({fmtMsgTime(m.reads[myId])})</span>
+                          <button className="nv-btn primary" onClick={() => onMarkDone(m.id)}>처리완료</button>
+                        </div>
+                      ) : (
+                        <button className="nv-btn primary" onClick={() => onMarkRead(m.id)}>확인함</button>
+                      )
                     ) : (
-                      confirmed
+                      read
                         ? <span className="memo-saved">확인했어요 ✓ ({fmtMsgTime(m.reads[myId])})</span>
                         : <button className="nv-btn primary" onClick={() => onMarkRead(m.id)}>확인</button>
+                    )}
+
+                    {/* 해야할일 등록 */}
+                    {todoForId === m.id ? (
+                      <div className="msg-todo-form">
+                        <div className="af-color-label">해야할일 등록</div>
+                        <input className="af-input" placeholder="할 일 제목" value={tTitle} onChange={(e) => setTTitle(e.target.value)} />
+                        <textarea className="af-memo" placeholder="내용 (선택)" value={tBody} onChange={(e) => setTBody(e.target.value)} />
+                        <div className="af-btns">
+                          <button className="nv-btn primary" onClick={submitTodo} disabled={!tTitle.trim()}>등록</button>
+                          <button className="nv-btn" onClick={() => { setTodoForId(null); setTTitle(""); setTBody(""); }}>취소</button>
+                        </div>
+                      </div>
+                    ) : todoDone === m.id ? (
+                      <span className="memo-saved">해야할일에 등록됐어요 ✓ (내 사건 탭에서 확인)</span>
+                    ) : (
+                      <button className="msg-todo-btn" onClick={() => openTodoForm(m)}>+ 해야할일 등록</button>
                     )}
                   </div>
                 )}
@@ -1124,12 +1313,20 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
             );
           })
       )}
+      {view === "inbox" && inbox.length > MSG_PAGE && (
+        <button className="more-btn" onClick={() => setInboxAll((s) => !s)}>
+          {inboxAll ? "접기" : `더보기 (${inbox.length - MSG_PAGE}개 더)`}
+        </button>
+      )}
 
       {view === "sent" && (
         sent.length === 0 ? <div className="empty">보낸 쪽지 없음</div> :
-          sent.map((m) => {
+          sentShown.map((m) => {
             const isTask = !!m.isTask;
             const open = openId === m.id;
+            const st = sentStatusOf(m);
+            // 상대가 한 명이라도 '확인함'을 눌렀으면 삭제 불가
+            const anyRead = (m.toIds || []).some((id) => m.reads && m.reads[id]);
             return (
               <div className="msg-item" key={m.id}>
                 <div className="msg-head" onClick={() => setOpenId(open ? null : m.id)}>
@@ -1137,6 +1334,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
                   {isTask
                     ? <span className="msg-badge task">업무</span>
                     : <span className="msg-badge notice">전달</span>}
+                  {st.label && <span className={"msg-badge " + st.cls}>{st.label}</span>}
                   <span className="msg-preview">{m.body}</span>
                   <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
                 </div>
@@ -1147,20 +1345,22 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
                       {(m.toIds || []).map((tid) => {
                         const done = m.done && m.done[tid];
                         const read = m.reads && m.reads[tid];
-                        // 단순 전달: 확인함/미확인 / 업무 요청: 처리완료/진행중
+                        // 업무 요청: 처리완료/확인함/미확인 · 단순 전달: 확인함/미확인
                         const stateLabel = isTask
-                          ? (done ? "처리완료" : "진행중")
+                          ? (done ? "처리완료" : read ? "확인함" : "미확인")
                           : (read ? "확인함" : "미확인");
-                        const stateOn = isTask ? !!done : !!read;
+                        const stateCls = (isTask ? (done ? "done" : read ? "read" : "") : (read ? "done" : ""));
                         return (
                           <div className="msg-stat-row" key={tid}>
                             <span className="msg-stat-name">{nameOf(tid)}</span>
-                            <span className={stateOn ? "msg-stat done" : "msg-stat"}>{stateLabel}</span>
+                            <span className={"msg-stat " + stateCls}>{stateLabel}</span>
                           </div>
                         );
                       })}
                     </div>
-                    {delId === m.id ? (
+                    {anyRead ? (
+                      <span className="msg-del-locked">상대가 확인하여 삭제할 수 없어요</span>
+                    ) : delId === m.id ? (
                       <span className="ev-del-wrap">
                         <button className="ev-del yes" onClick={() => { onDeleteMessage(m.id); setDelId(null); }}>삭제</button>
                         <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
@@ -1173,6 +1373,11 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
               </div>
             );
           })
+      )}
+      {view === "sent" && sent.length > MSG_PAGE && (
+        <button className="more-btn" onClick={() => setSentAll((s) => !s)}>
+          {sentAll ? "접기" : `더보기 (${sent.length - MSG_PAGE}개 더)`}
+        </button>
       )}
     </div>
   );
@@ -1269,6 +1474,80 @@ function Panel({ title, sum, scope, favCases, onToggleFav, staffName, collapsibl
   );
 }
 
+/* ===== 해야할일 (개인용, 계정별) ===== */
+function TodoRow({ t, onToggle, onDelete, delId, setDelId, expanded, onToggleExpand }) {
+  return (
+    <div className={"todo-row" + (t.done ? " done" : "")}>
+      <button className="todo-check" onClick={() => onToggle(t.id)} title={t.done ? "완료 해제" : "완료"}>{t.done ? "☑" : "☐"}</button>
+      <div className={"todo-main" + (t.body ? " has-body" : "")} onClick={() => { if (t.body) onToggleExpand(t.id); }}>
+        <div className="todo-title">
+          <span className="todo-title-txt">{t.title}</span>
+          {t.body && <span className="todo-chev">{expanded ? "▴" : "▾"}</span>}
+        </div>
+        {expanded && t.body && <div className="todo-body">{t.body}</div>}
+      </div>
+      {delId === t.id ? (
+        <span className="ev-del-wrap">
+          <button className="ev-del yes" onClick={() => { onDelete(t.id); setDelId(null); }}>삭제</button>
+          <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
+        </span>
+      ) : (
+        <button className="todo-del" onClick={() => setDelId(t.id)} title="삭제">✕</button>
+      )}
+    </div>
+  );
+}
+
+function TodoPanel({ todos, onAdd, onToggle, onDelete }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [delId, setDelId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const toggleExpand = (id) => setExpandedId((cur) => (cur === id ? null : id));
+  const list = todos || [];
+  const undone = list.filter((t) => !t.done);
+  const doneList = list.filter((t) => t.done);
+  const add = async () => {
+    if (!title.trim()) return;
+    await onAdd({ title, body });
+    setTitle(""); setBody(""); setShowAdd(false);
+  };
+  return (
+    <div className="panel todo-panel">
+      <div className="todo-head">
+        <span className="todo-head-title">할 일{undone.length > 0 ? <span className="todo-count">{undone.length}</span> : null}</span>
+        <button className="cal-add-btn" onClick={() => setShowAdd((s) => !s)}>{showAdd ? "닫기" : "+ 추가"}</button>
+      </div>
+      {showAdd && (
+        <div className="todo-form">
+          <input className="af-input" placeholder="할 일 제목" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <textarea className="af-memo" placeholder="내용 (선택)" value={body} onChange={(e) => setBody(e.target.value)} />
+          <div className="af-btns">
+            <button className="nv-btn primary" onClick={add} disabled={!title.trim()}>추가</button>
+            <button className="nv-btn" onClick={() => { setShowAdd(false); setTitle(""); setBody(""); }}>취소</button>
+          </div>
+        </div>
+      )}
+      {list.length === 0 ? (
+        <div className="empty">할 일 없음</div>
+      ) : (
+        <>
+          {undone.map((t) => (
+            <TodoRow key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} delId={delId} setDelId={setDelId}
+              expanded={expandedId === t.id} onToggleExpand={toggleExpand} />
+          ))}
+          {doneList.length > 0 && <div className="todo-done-label">완료됨 ({doneList.length})</div>}
+          {doneList.map((t) => (
+            <TodoRow key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} delId={delId} setDelId={setDelId}
+              expanded={expandedId === t.id} onToggleExpand={toggleExpand} />
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState(null);
@@ -1279,6 +1558,8 @@ function App() {
   const [messages, setMessages] = useState([]);   // office_messages
   const [colorRules, setColorRules] = useState(null); // office_config/colorRules
   const [favCases, setFavCases] = useState([]);       // office_config/fav_<myId>
+  const [todos, setTodos] = useState([]);             // office_config/todos_<myId>
+  const [calSeen, setCalSeen] = useState(null);       // office_config/calseen_<myId> {baseline, ids}
   const [loadingData, setLoadingData] = useState(false);
 
   const [tab, setTab] = useState("cases");
@@ -1346,7 +1627,7 @@ function App() {
     return unsub;
   }, []);
 
-  // 로그인되면 사건/직원/개인일정 데이터 로드
+  // 로그인되면 사건/직원/설정 데이터 로드 (일정·쪽지·해야할일은 아래 실시간 리스너가 담당)
   const loadData = async () => {
     setLoadingData(true);
     try {
@@ -1361,21 +1642,6 @@ function App() {
     } catch (e) {
       // 무시 (권한/네트워크)
     }
-    // 개인일정은 컬렉션/규칙이 아직 없을 수 있어 별도 처리(사건 로딩을 막지 않도록)
-    try {
-      const schSnap = await getDocs(collection(db, "office_schedules"));
-      const sch = []; schSnap.forEach((d) => sch.push({ id: d.id, ...d.data() }));
-      setSchedules(sch);
-    } catch (e) {
-      setSchedules([]);
-    }
-    try {
-      const mSnap = await getDocs(collection(db, "office_messages"));
-      const ms = []; mSnap.forEach((d) => ms.push({ id: d.id, ...d.data() }));
-      setMessages(ms);
-    } catch (e) {
-      setMessages([]);
-    }
     const mid = profile?.legacyStaffId || user?.uid;
     try {
       const crSnap = await getDoc(doc(db, "office_config", "colorRules"));
@@ -1385,15 +1651,19 @@ function App() {
       const fvSnap = await getDoc(doc(db, "office_config", "fav_" + mid));
       setFavCases(fvSnap.exists() ? (fvSnap.data().caseIds || []) : []);
     } catch (e) { setFavCases([]); }
-    setLoadingData(false);
-  };
-
-  const loadMessages = async () => {
+    // 캘린더 '새 공유 알림' 기준: 없으면 지금 시점을 기준선으로 (기존 일정이 무더기로 새 알림 뜨는 것 방지)
     try {
-      const mSnap = await getDocs(collection(db, "office_messages"));
-      const ms = []; mSnap.forEach((d) => ms.push({ id: d.id, ...d.data() }));
-      setMessages(ms);
-    } catch (e) {}
+      const csSnap = await getDoc(doc(db, "office_config", "calseen_" + mid));
+      if (csSnap.exists()) {
+        const d = csSnap.data();
+        setCalSeen({ baseline: d.baseline || 0, ids: d.ids || [] });
+      } else {
+        const seed = { baseline: Date.now(), ids: [] };
+        setCalSeen(seed);
+        try { await setDoc(doc(db, "office_config", "calseen_" + mid), seed); } catch (e) {}
+      }
+    } catch (e) { setCalSeen({ baseline: Date.now(), ids: [] }); }
+    setLoadingData(false);
   };
 
   const sendMessage = async ({ toIds, body, isTask }) => {
@@ -1404,12 +1674,11 @@ function App() {
         toIds, body, isTask: !!isTask,
         createdAt: Date.now(), reads: {}, done: {},
       });
-      await loadMessages();
     } catch (e) {}
   };
-  const markRead = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["reads." + myId]: Date.now() }); await loadMessages(); } catch (e) {} };
-  const markDone = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["done." + myId]: Date.now() }); await loadMessages(); } catch (e) {} };
-  const deleteMessage = async (id) => { try { await deleteDoc(doc(db, "office_messages", id)); await loadMessages(); } catch (e) {} };
+  const markRead = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["reads." + myId]: Date.now() }); } catch (e) {} };
+  const markDone = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["done." + myId]: Date.now() }); } catch (e) {} };
+  const deleteMessage = async (id) => { try { await deleteDoc(doc(db, "office_messages", id)); } catch (e) {} };
 
   const saveColorRules = async (rules) => {
     setColorRules(rules);
@@ -1422,22 +1691,77 @@ function App() {
     try { await setDoc(doc(db, "office_config", "fav_" + myId), { caseIds: next }); } catch (e) {}
   };
 
+  // 해야할일 (개인용)
+  const persistTodos = async (items) => {
+    try { await setDoc(doc(db, "office_config", "todos_" + myId), { items }); } catch (e) {}
+  };
+  const addTodo = async ({ title, body }) => {
+    const item = { id: "todo_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), title: (title || "").trim(), body: (body || "").trim(), done: false, createdAt: Date.now() };
+    const next = [item, ...(todos || [])];
+    setTodos(next);
+    await persistTodos(next);
+  };
+  const toggleTodo = async (id) => {
+    const next = (todos || []).map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+    setTodos(next);
+    await persistTodos(next);
+  };
+  const deleteTodo = async (id) => {
+    const next = (todos || []).filter((t) => t.id !== id);
+    setTodos(next);
+    await persistTodos(next);
+  };
+
+  // 캘린더 새 공유 알림 확인 처리
+  const ackCalendar = async (idsToAck) => {
+    const base = calSeen?.baseline || Date.now();
+    const merged = Array.from(new Set([...((calSeen?.ids) || []), ...idsToAck]));
+    const next = { baseline: base, ids: merged };
+    setCalSeen(next);
+    try { await setDoc(doc(db, "office_config", "calseen_" + myId), next); } catch (e) {}
+  };
+
   const deleteSchedule = async (id) => {
-    try { await deleteDoc(doc(db, "office_schedules", id)); await loadData(); } catch (e) {}
+    try { await deleteDoc(doc(db, "office_schedules", id)); } catch (e) {}
   };
 
   const updateScheduleFields = async (id, patch) => {
-    try { await updateDoc(doc(db, "office_schedules", id), patch); await loadData(); } catch (e) {}
+    try { await updateDoc(doc(db, "office_schedules", id), patch); } catch (e) {}
   };
 
   useEffect(() => {
     if (user && profile) loadData();
   }, [user, profile]);
 
+  // 실시간: 쪽지 (새로고침 없이 즉시 반영)
   useEffect(() => {
     if (!user || !profile) return;
-    const t = setInterval(() => { loadMessages(); }, 45000);
-    return () => clearInterval(t);
+    const unsub = onSnapshot(collection(db, "office_messages"), (snap) => {
+      const ms = []; snap.forEach((d) => ms.push({ id: d.id, ...d.data() }));
+      setMessages(ms);
+    }, () => {});
+    return unsub;
+  }, [user, profile]);
+
+  // 실시간: 개인/공유 일정 (새로고침 없이 즉시 반영)
+  useEffect(() => {
+    if (!user || !profile) return;
+    const unsub = onSnapshot(collection(db, "office_schedules"), (snap) => {
+      const arr = []; snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+      setSchedules(arr);
+    }, () => {});
+    return unsub;
+  }, [user, profile]);
+
+  // 실시간: 내 해야할일
+  useEffect(() => {
+    if (!user || !profile) return;
+    const mid = profile?.legacyStaffId || user?.uid;
+    if (!mid) return;
+    const unsub = onSnapshot(doc(db, "office_config", "todos_" + mid), (snap) => {
+      setTodos(snap.exists() ? (snap.data().items || []) : []);
+    }, () => {});
+    return unsub;
   }, [user, profile]);
 
   useEffect(() => {
@@ -1499,6 +1823,21 @@ function App() {
     return m;
   }, [schedules]);
 
+  // 남이 나에게 공유한 일정 중, 기준선 이후 생성됐고 아직 확인 안 한 것 = '새 공유 알림'
+  const newSharedSchedules = useMemo(() => {
+    if (!calSeen) return [];
+    const base = calSeen.baseline || 0;
+    const ack = new Set(calSeen.ids || []);
+    return (schedules || [])
+      .filter((s) =>
+        s.ownerId && s.ownerId !== myId &&
+        Array.isArray(s.sharedWith) && s.sharedWith.includes(myId) &&
+        (s.createdAt || 0) > base && !ack.has(s.id)
+      )
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [schedules, myId, calSeen]);
+  const newSharedCount = newSharedSchedules.length;
+
   // 캘린더용: 날짜별 일정 맵 (범위 = 내 사건 탭과 동일 + 내 개인일정)
   const eventsByDate = useMemo(() => {
     const map = {};
@@ -1526,7 +1865,7 @@ function App() {
     const winEnd = `${nowY + 3}-12-31`;
     visibleSchedules.forEach((s) => {
       const vis = s.visibility || "private";
-      const color = s.color || SCHED_COLORS[vis] || SCHED_COLORS.private;
+      const color = scheduleColor(s, myId, colorRules);
       const chip = (s.allDay ? "" : (s.time ? s.time + " " : "")) + (s.title || "일정");
       const mine = s.ownerId === myId;
       const ownerName = mine ? "" : (staffName(s.ownerId) || "");
@@ -1552,7 +1891,7 @@ function App() {
       map[k].sort((a, b) => ((ORD[a.type] == null ? 9 : ORD[a.type]) - (ORD[b.type] == null ? 9 : ORD[b.type])));
     });
     return map;
-  }, [myCases, teamCases, isLeader, visibleSchedules, myId, staff]);
+  }, [myCases, teamCases, isLeader, visibleSchedules, myId, staff, colorRules]);
 
   // 특정 사건집합의 요약 계산
   const summarize = (list) => {
@@ -1644,7 +1983,9 @@ function App() {
         <div className="widget-header" {...(pinned ? {} : { "data-tauri-drag-region": true })}>
           <div className="tabs">
             <button className={tab === "cases" ? "tab active" : "tab"} onClick={() => setTab("cases")}>내 사건</button>
-            <button className={tab === "calendar" ? "tab active" : "tab"} onClick={() => setTab("calendar")}>캘린더</button>
+            <button className={tab === "calendar" ? "tab active" : "tab"} onClick={() => setTab("calendar")}>
+              캘린더{newSharedCount > 0 ? <span className="tab-badge">{newSharedCount}</span> : null}
+            </button>
             <button className={tab === "messages" ? "tab active" : "tab"} onClick={() => setTab("messages")}>
               쪽지{unreadCount > 0 ? <span className="tab-badge">{unreadCount}</span> : null}
             </button>
@@ -1694,6 +2035,7 @@ function App() {
             <div className="empty" style={{ marginTop: 30 }}>사건 불러오는 중...</div>
           ) : (
             <>
+              <TodoPanel todos={todos} onAdd={addTodo} onToggle={toggleTodo} onDelete={deleteTodo} />
               <Panel title={isLeader ? "내 담당" : null} sum={mySum} scope={isLeader ? "own" : ""}
                 favCases={favCases} onToggleFav={toggleFav} staffName={staffName} />
               {isLeader && teamSum && (
@@ -1719,6 +2061,8 @@ function App() {
               onDeleteSchedule={deleteSchedule}
               onUpdateSchedule={updateScheduleFields}
               onSaveColorRules={saveColorRules}
+              newShared={newSharedSchedules}
+              onAckShared={ackCalendar}
             />
           )
         )}
@@ -1731,6 +2075,7 @@ function App() {
             onMarkRead={markRead}
             onMarkDone={markDone}
             onDeleteMessage={deleteMessage}
+            onAddTodo={addTodo}
           />
         )}
       </div>

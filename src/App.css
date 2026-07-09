@@ -594,7 +594,7 @@ body {
 }
 .cal-wd {
   text-align: center;
-  font-size: 12px;
+  font-size: clamp(9px, 1.25vw, 12px);
   color: #9a9aa0;
   padding: 2px 0;
 }
@@ -607,7 +607,7 @@ body {
   gap: 1px;
 }
 .cal-cell {
-  min-height: 84px;
+  min-height: clamp(44px, 8.5vw, 84px);
   padding: 4px 3px;
   display: flex;
   flex-direction: column;
@@ -624,7 +624,7 @@ body {
 .cal-cell.today { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.38); }
 
 .cal-day {
-  font-size: 15px;
+  font-size: clamp(11px, 1.55vw, 15px);
   color: #e2e2e6;
   line-height: 1.35;
   text-align: center;
@@ -633,14 +633,14 @@ body {
 .cal-day.sat { color: #6db3ff; }
 
 .cal-lu {
-  font-size: 8.5px;
+  font-size: clamp(6.5px, 0.9vw, 8.5px);
   color: #85858b;
   line-height: 1.05;
   text-align: center;
 }
 
 .cal-hol {
-  font-size: 10.5px;
+  font-size: clamp(8px, 1.1vw, 10.5px);
   color: #ff8a82;
   line-height: 1.15;
   max-width: 100%;
@@ -659,7 +659,7 @@ body {
   width: 100%;
 }
 .ev-chip {
-  font-size: 12px;
+  font-size: clamp(8.5px, 1.25vw, 12px);
   line-height: 1.35;
   border-radius: 4px;
   padding: 1px 5px;
@@ -691,7 +691,7 @@ body {
   white-space: nowrap;
 }
 .ev-more {
-  font-size: 11px;
+  font-size: clamp(8px, 1.15vw, 11px);
   color: #9a9aa0;
   padding-left: 4px;
   line-height: 1.2;
@@ -1211,4 +1211,345 @@ body {
 .msg-badge.notice {
   background: rgba(100, 210, 255, 0.18);
   color: #64d2ff;
+}
+/* ========================================================= */
+/* ↓↓↓ 여기부터 v0.1.7 추가분 ↓↓↓ */
+/* (실시간 반영 + 쪽지 상태개선 + 해야할일 + 캘린더 공유알림/더블클릭) */
+/* ========================================================= */
+
+/* 쪽지 뱃지: 기본(집계용) + 확인함(파랑) */
+.msg-badge { background: rgba(255,255,255,0.10); color: #b8b8bd; }
+.msg-badge.notice { background: rgba(100,210,255,0.18); color: #64d2ff; }
+.msg-badge.task { background: rgba(255,159,10,0.2); color: #ffb340; }
+.msg-badge.done { background: rgba(48,209,88,0.2); color: #4ade80; }
+.msg-badge.read { background: rgba(77,163,255,0.2); color: #7fb0ff; }
+
+/* 업무 요청: 확인함 + 처리완료 2단계 버튼 줄 */
+.msg-step { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* 삭제 확정 버튼 묶음 (쪽지/할일 공용) */
+.ev-del-wrap { display: inline-flex; gap: 6px; align-self: flex-start; }
+
+/* 확인 후 삭제 불가 안내 */
+.msg-del-locked { align-self: flex-start; font-size: 11px; color: #8e8e93; }
+
+/* 쪽지 → 해야할일 등록 */
+.msg-todo-btn {
+  align-self: flex-start;
+  border: 1px dashed rgba(255,255,255,0.22);
+  background: transparent;
+  color: #cfcfd3;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.msg-todo-btn:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.msg-todo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 9px;
+  padding: 9px;
+}
+.msg-todo-form .af-input, .msg-todo-form .af-memo { width: 100%; }
+
+/* ===== 해야할일 패널 ===== */
+.todo-panel { margin-bottom: 16px; }
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.todo-head-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  padding-left: 9px;
+  border-left: 3px solid #0a84ff;
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.todo-count {
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0c2a14;
+  background: #30d158;
+  border-radius: 9px;
+  text-align: center;
+}
+.todo-head .cal-add-btn { margin-left: auto; }
+.todo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 9px;
+  padding: 9px;
+  margin-bottom: 8px;
+}
+.todo-form .af-input, .todo-form .af-memo { width: 100%; }
+.todo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 6px 2px 6px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.todo-check {
+  border: none;
+  background: transparent;
+  color: #7fb0ff;
+  font-size: 17px;
+  line-height: 1.15;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.todo-check:hover { color: #a9caff; }
+.todo-main { flex: 1; min-width: 0; }
+.todo-title {
+  font-size: 14px;
+  color: #f2f2f4;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.todo-body {
+  font-size: 12.5px;
+  color: #a0a0a6;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 2px;
+}
+.todo-row.done .todo-title { color: #7c7c81; text-decoration: line-through; }
+.todo-row.done .todo-body { color: #6a6a6f; }
+.todo-row.done .todo-check { color: #4ade80; }
+.todo-del {
+  border: none;
+  background: transparent;
+  color: #6f6f74;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.todo-del:hover { color: #ff6961; background: rgba(255,255,255,0.08); }
+.todo-done-label {
+  font-size: 11px;
+  color: #7c7c81;
+  margin: 8px 0 2px;
+  padding-left: 4px;
+}
+
+/* ===== 캘린더: 새로 공유된 일정 알림 ===== */
+.cal-newshare {
+  background: rgba(100,210,255,0.10);
+  border: 1px solid rgba(100,210,255,0.28);
+  border-radius: 10px;
+  padding: 9px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cal-newshare-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cns-head-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9fe0ff;
+}
+.cal-newshare-head .cal-add-btn { margin-left: auto; }
+.cal-newshare-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-top: 1px solid rgba(100,210,255,0.14);
+}
+.cns-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.cns-main { flex: 1; min-width: 0; cursor: pointer; display: flex; flex-direction: column; gap: 1px; border-radius: 5px; }
+.cns-main:hover .cns-title { text-decoration: underline; }
+.cns-title {
+  font-size: 13.5px;
+  color: #eef6fb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cns-sub { font-size: 11px; color: #93b4c4; }
+.cns-ok {
+  border: none;
+  background: rgba(100,210,255,0.9);
+  color: #06283a;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cns-ok:hover { background: #64d2ff; }
+
+/* v0.1.7: 할일 내용 접기/펼치기 */
+.todo-main.has-body { cursor: pointer; }
+.todo-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.todo-title-txt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-chev { font-size: 11px; color: #8e8e93; flex-shrink: 0; }
+.todo-main.has-body:hover .todo-title-txt { color: #fff; }
+
+/* ========================================================= */
+/* ↓↓↓ v0.1.7 추가분 2 (모달 + 설정버튼 + 쪽지 서브탭 뱃지) ↓↓↓ */
+/* ========================================================= */
+
+/* 설정(톱니바퀴) 버튼 */
+.cal-gear-btn {
+  border: none;
+  background: rgba(255,255,255,0.08);
+  color: #cfcfd3;
+  font-size: 13px;
+  width: 26px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+}
+.cal-gear-btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
+
+/* 위젯 내부 모달(팝업 창) */
+.wg-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+}
+.wg-modal {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  background: #26262a;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  padding: 12px;
+}
+.wg-modal::-webkit-scrollbar { width: 6px; }
+.wg-modal::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+.wg-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.wg-modal-title { font-size: 15px; font-weight: 700; color: #fff; }
+.wg-modal-x {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border: none;
+  background: rgba(255,255,255,0.10);
+  color: #cfcfd3;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  z-index: 2;
+}
+.wg-modal-x.static { position: static; margin-left: auto; }
+.wg-modal-x:hover { background: rgba(255,80,72,0.9); color: #fff; }
+.wg-modal-body { display: flex; flex-direction: column; }
+/* 모달 안의 일정폼/네이버·색상 패널은 여백 정리 */
+.wg-modal-body .add-form { margin-bottom: 0; background: transparent; padding: 0; }
+.wg-modal-body .nv-import:first-child { margin-top: 0; border-top: none; padding-top: 0; }
+
+/* 쪽지 서브탭(받은/보낸) 숫자 뱃지 */
+.msg-tab-badge {
+  display: inline-block;
+  margin-left: 5px;
+  min-width: 15px;
+  height: 15px;
+  line-height: 15px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: #ff453a;
+  border-radius: 8px;
+  text-align: center;
+}
+.msg-tab.on .msg-tab-badge { background: #ff453a; }
+
+/* v0.1.7: 색상 선택 드롭다운 */
+.color-dd { position: relative; display: inline-block; }
+.color-dd-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 5px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  cursor: pointer;
+}
+.color-dd-trigger:hover { border-color: rgba(255,255,255,0.4); }
+.color-dd-sw {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);
+}
+.color-dd-chev { font-size: 10px; color: #9a9aa0; }
+.color-dd-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 290;
+}
+.color-dd-pop {
+  position: absolute;
+  z-index: 300;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 208px;
+  max-width: 70vw;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  background: #2c2c31;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
