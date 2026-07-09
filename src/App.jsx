@@ -1007,22 +1007,24 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
                     <span className="cal-ev-kind">일정{e.repeat && e.repeat !== "none" ? " 🔁" : ""}</span>
                     <span className="cal-ev-label">{e.chip}{e.ownerName ? " · " + e.ownerName : ""}</span>
                     <span className="cal-ev-chev">{expanded ? "▴" : "▾"}</span>
-                    {e.canDelete && (
+                    {(e.canEdit || e.canDelete) && (
                       <span className="ev-actions">
-                        <button className="ev-edit-x" onClick={(ev) => { ev.stopPropagation(); openEdit(e.scheduleId); }} title="수정">✎</button>
-                        {delId === e.scheduleId ? (
+                        {e.canEdit && (
+                          <button className="ev-edit-x" onClick={(ev) => { ev.stopPropagation(); openEdit(e.scheduleId); }} title="수정">✎</button>
+                        )}
+                        {e.canDelete && (delId === e.scheduleId ? (
                           <>
                             <button className="ev-del yes" onClick={(ev) => { ev.stopPropagation(); onDeleteSchedule(e.scheduleId); setDelId(null); }}>삭제</button>
                             <button className="ev-del no" onClick={(ev) => { ev.stopPropagation(); setDelId(null); }}>취소</button>
                           </>
                         ) : (
                           <button className="ev-del-x" onClick={(ev) => { ev.stopPropagation(); setDelId(e.scheduleId); }} title="삭제">✕</button>
-                        )}
+                        ))}
                       </span>
                     )}
                   </div>
                   {expanded && (
-                    e.canDelete ? (
+                    e.canEdit ? (
                       <MemoEditor scheduleId={e.scheduleId} initial={e.memo}
                         onSave={(m) => onUpdateSchedule(e.scheduleId, { memo: m })} />
                     ) : (
@@ -1181,7 +1183,7 @@ function inboxStageOf(m, myId) {
 /* ===== 쪽지 탭 ===== */
 const MSG_PAGE = 7;
 function isInboxPending(m, myId) {
-  return m.isTask ? !(m.done && m.done[myId]) : !(m.reads && m.reads[myId]);
+  return !(m.reads && m.reads[myId]);
 }
 function isSentPending(m) {
   const ids = Array.isArray(m.toIds) ? m.toIds : [];
@@ -1236,7 +1238,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
   const openTodoForm = (m) => { setTodoForId(m.id); setTTitle(""); setTBody(m.body || ""); setTodoDone(null); };
   const submitTodo = async () => {
     if (!tTitle.trim()) return;
-    await onAddTodo({ title: tTitle, body: tBody });
+    await onAddTodo({ title: tTitle, body: tBody, srcMsgId: todoForId });
     const doneFor = todoForId;
     setTodoForId(null); setTTitle(""); setTBody("");
     setTodoDone(doneFor);
@@ -1247,7 +1249,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
     const isTask = !!m.isTask;
     const read = !!(m.reads && m.reads[myId]);
     const done = !!(m.done && m.done[myId]);
-    const pending = isTask ? !done : !read;
+    const pending = !read;
     const stage = inboxStageOf(m, myId);
     const open = openId === m.id;
     return (
@@ -1877,16 +1879,21 @@ function App() {
   const persistTodos = async (items) => {
     try { await setDoc(doc(db, "office_config", "todos_" + myId), { items }); } catch (e) {}
   };
-  const addTodo = async ({ title, body }) => {
-    const item = { id: "todo_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), title: (title || "").trim(), body: (body || "").trim(), done: false, createdAt: Date.now() };
+  const addTodo = async ({ title, body, srcMsgId }) => {
+    const item = { id: "todo_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), title: (title || "").trim(), body: (body || "").trim(), done: false, createdAt: Date.now(), srcMsgId: srcMsgId || null };
     const next = [item, ...(todos || [])];
     setTodos(next);
     await persistTodos(next);
   };
   const toggleTodo = async (id) => {
+    const cur = (todos || []).find((t) => t.id === id);
     const next = (todos || []).map((t) => (t.id === id ? { ...t, done: !t.done } : t));
     setTodos(next);
     await persistTodos(next);
+    // 쪽지에서 등록한 할일을 '완료'로 바꾸면 → 원본 받은쪽지도 자동 확인함+처리완료 (발신인에게 연동)
+    if (cur && !cur.done && cur.srcMsgId) {
+      try { await updateDoc(doc(db, "office_messages", cur.srcMsgId), { ["reads." + myId]: Date.now(), ["done." + myId]: Date.now() }); } catch (e) {}
+    }
   };
   const editTodo = async (id, { title, body }) => {
     const next = (todos || []).map((t) => (t.id === id ? { ...t, title: (title || "").trim(), body: (body || "").trim() } : t));
@@ -1993,8 +2000,8 @@ function App() {
     () => (messages || []).filter((m) => {
       if (msgHiddenInbox(m, myId)) return false;
       if (!(Array.isArray(m.toIds) && m.toIds.includes(myId))) return false;
-      // 단순 전달=확인(reads) 안했으면 미처리 / 업무 요청=처리완료(done) 안했으면 미처리
-      return m.isTask ? !(m.done && m.done[myId]) : !(m.reads && m.reads[myId]);
+      // 전달·업무 모두 '확인함(reads)'을 안 누르면 미확인. 확인함 누르면 즉시 배지에서 빠짐.
+      return !(m.reads && m.reads[myId]);
     }).length,
     [messages, myId]
   );
@@ -2072,7 +2079,7 @@ function App() {
       const evBase = {
         type: "schedule", allDay: !!s.allDay, color,
         chip, label: chip, title: s.title, scheduleId: s.id, visibility: vis,
-        canDelete: mine, ownerName, memo: s.memo || "", repeat: rep,
+        canEdit: mine, canDelete: true, ownerName, memo: s.memo || "", repeat: rep,
       };
       // 반복 확장은 직접 만든 일정만. 네이버 일정은 실제 발생 날짜가 이미 파일에 있으므로 확장하지 않음
       if (rep !== "none" && s.source !== "naver") {
