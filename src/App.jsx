@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalPosition } from "@tauri-apps/api/window";
+import { LogicalPosition, UserAttentionType } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -25,6 +26,55 @@ const openFilter = (special, scope) => {
   const q = scope ? `?filter=${special}&scope=${scope}` : `?filter=${special}`;
   try { openUrl(`${APP_URL}/${q}`); } catch (e) {}
 };
+
+/* ===== 데스크톱 알림 (작업표시줄 깜빡임 + 우측하단 팝업 + 알림음) ===== */
+// 알림음: 짧은 두 음 '딩-동' (Web Audio, 별도 음원 파일 불필요)
+let _notifAudioCtx = null;
+function playNotifDing() {
+  try {
+    if (!_notifAudioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      _notifAudioCtx = new AC();
+    }
+    const ctx = _notifAudioCtx;
+    if (ctx.state === "suspended") { try { ctx.resume(); } catch (e) {} }
+    const now = ctx.currentTime;
+    const tone = (freq, start, dur) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, now + start);
+      g.gain.exponentialRampToValueAtTime(0.22, now + start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(now + start); o.stop(now + start + dur + 0.02);
+    };
+    tone(880, 0, 0.18);      // 라
+    tone(1174.7, 0.12, 0.24); // 레 (한 옥타브 위 느낌)
+  } catch (e) {}
+}
+
+// 실제 알림 발생: 창이 화면에 보이고 포커스면 조용히(카톡 방식), 아니면 알림.
+// cfg = { enabled, sound }
+async function fireDesktopNotif(title, body, cfg) {
+  try {
+    if (!cfg || cfg.enabled === false) return;
+    // 창이 지금 포커스(사용자가 보고 있음)면 조용히
+    if (typeof document !== "undefined" && document.hasFocus && document.hasFocus()) return;
+    // 1) 작업표시줄 깜빡임/강조 (포커스될 때까지)
+    try { appWindow.requestUserAttention(UserAttentionType.Critical); } catch (e) {}
+    // 2) 알림음
+    if (cfg.sound !== false) playNotifDing();
+    // 3) 우측하단 팝업(toast)
+    try {
+      let granted = await isPermissionGranted();
+      if (!granted) { const p = await requestPermission(); granted = p === "granted"; }
+      if (granted) sendNotification({ title, body });
+    } catch (e) {}
+  } catch (e) {}
+}
 
 /* ===== 위젯 위치/고정 상태 저장 (이 PC에만 저장, 기기별 독립) ===== */
 const POS_KEY = "widget_pos_v1";
@@ -1200,7 +1250,7 @@ function msgInTrash(m, uid) {
   if (m.trashed && m.fromId === uid) return true; // 구버전 전역 trashed = 보낸사람 휴지통
   return false;
 }
-function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onUnsend, onTrashMine, onEmptyTrash, trashLogs, isAdmin, onAddTodo }) {
+function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onUnsend, onTrashMine, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif }) {
   const [openId, setOpenId] = useState(null);
   const [delId, setDelId] = useState(null);
   const [inboxAll, setInboxAll] = useState(false);
@@ -1438,11 +1488,39 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
     )
   );
 
+  const notif = notifSettings || { enabled: true, sound: true };
+  const notifPanel = (
+    <div className="notif-settings">
+      <div className="notif-help">새 쪽지·공유일정이 오면 작업표시줄이 깜빡이고, 화면 우측 아래에 알림창이 떠요. (위젯을 보고 있을 땐 조용히 알려줘요)</div>
+      <div className="notif-row">
+        <div className="notif-row-label">
+          <div className="notif-row-title">알림 받기</div>
+          <div className="notif-row-desc">깜빡임 · 알림창 · 알림음</div>
+        </div>
+        <button
+          className={"notif-switch" + (notif.enabled !== false ? " on" : "")}
+          onClick={() => onSaveNotif({ enabled: !(notif.enabled !== false), sound: notif.sound !== false })}
+        >{notif.enabled !== false ? "켜짐" : "꺼짐"}</button>
+      </div>
+      <div className={"notif-row" + (notif.enabled === false ? " disabled" : "")}>
+        <div className="notif-row-label">
+          <div className="notif-row-title">알림음</div>
+          <div className="notif-row-desc">소리로도 알려줘요</div>
+        </div>
+        <button
+          className={"notif-switch" + (notif.sound !== false ? " on" : "")}
+          disabled={notif.enabled === false}
+          onClick={() => onSaveNotif({ enabled: notif.enabled !== false, sound: !(notif.sound !== false) })}
+        >{notif.sound !== false ? "켜짐" : "꺼짐"}</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="msg-wrap">
       <div className="msg-top">
         <button className="msg-compose-btn" onClick={() => setComposing(true)}>✉ 쪽지 작성</button>
-        <button className="cal-gear-btn" onClick={() => { setShowSettings(true); setSettingsView("trash"); }} title="휴지통 · 기록">⚙</button>
+        <button className="cal-gear-btn" onClick={() => { setShowSettings(true); setSettingsView("trash"); }} title="휴지통 · 알림 설정">⚙</button>
       </div>
 
       <div className="sec-label msg-sec">받은 쪽지{inboxPendingCount > 0 ? <span className="sec-cnt">{inboxPendingCount}</span> : null}</div>
@@ -1487,17 +1565,18 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         <div className="wg-modal-overlay" onClick={closeSettings}>
           <div className="wg-modal" onClick={(e) => e.stopPropagation()}>
             <div className="wg-modal-head">
-              <span className="wg-modal-title">{isAdmin ? "휴지통 · 기록" : "휴지통"}</span>
+              <span className="wg-modal-title">설정</span>
               <button className="wg-modal-x static" onClick={closeSettings} title="닫기">✕</button>
             </div>
-            {isAdmin && (
-              <div className="msg-sub-toggle">
-                <button className={settingsView === "trash" ? "on" : ""} onClick={() => setSettingsView("trash")}>휴지통{trash.length > 0 ? ` (${trash.length})` : ""}</button>
+            <div className="msg-sub-toggle">
+              <button className={settingsView === "trash" ? "on" : ""} onClick={() => setSettingsView("trash")}>휴지통{trash.length > 0 ? ` (${trash.length})` : ""}</button>
+              <button className={settingsView === "notif" ? "on" : ""} onClick={() => setSettingsView("notif")}>🔔 알림</button>
+              {isAdmin && (
                 <button className={settingsView === "logs" ? "on" : ""} onClick={() => setSettingsView("logs")}>비우기 기록</button>
-              </div>
-            )}
+              )}
+            </div>
             <div className="wg-modal-body">
-              {(!isAdmin || settingsView === "trash") ? trashPanel : logsPanel}
+              {settingsView === "notif" ? notifPanel : (settingsView === "logs" && isAdmin) ? logsPanel : trashPanel}
             </div>
           </div>
         </div>
@@ -1708,7 +1787,16 @@ function App() {
   const [todos, setTodos] = useState([]);             // office_config/todos_<myId>
   const [calSeen, setCalSeen] = useState(null);       // office_config/calseen_<myId> {baseline, ids}
   const [trashLogs, setTrashLogs] = useState([]);     // office_trashlogs (관리자만 조회)
+  const [notifSettings, setNotifSettings] = useState({ enabled: true, sound: true }); // office_config/notif_<myId>
   const [loadingData, setLoadingData] = useState(false);
+
+  // 알림 감지용 refs (재구독 없이 최신값 읽기 + 이미 본 항목 기준선)
+  const notifCfgRef = useRef({ enabled: true, sound: true });
+  useEffect(() => { notifCfgRef.current = notifSettings || { enabled: true, sound: true }; }, [notifSettings]);
+  const notifStaffRef = useRef([]);
+  useEffect(() => { notifStaffRef.current = staff || []; }, [staff]);
+  const seenMsgIdsRef = useRef(null);   // null = 아직 기준선 안 잡음
+  const seenSchedIdsRef = useRef(null);
 
   const [tab, setTab] = useState("cases");
   const [opacity, setOpacity] = useState(1);
@@ -1823,6 +1911,16 @@ function App() {
         try { await setDoc(doc(db, "office_config", "calseen_" + mid), seed); } catch (e) {}
       }
     } catch (e) { setCalSeen({ baseline: Date.now(), ids: [] }); }
+    // 알림 on/off 설정 (계정별). 없으면 기본 켜짐.
+    try {
+      const nSnap = await getDoc(doc(db, "office_config", "notif_" + mid));
+      if (nSnap.exists()) {
+        const d = nSnap.data();
+        setNotifSettings({ enabled: d.enabled !== false, sound: d.sound !== false });
+      } else {
+        setNotifSettings({ enabled: true, sound: true });
+      }
+    } catch (e) { setNotifSettings({ enabled: true, sound: true }); }
     setLoadingData(false);
   };
 
@@ -1879,6 +1977,10 @@ function App() {
   const saveColorRules = async (rules) => {
     setColorRules(rules);
     try { await setDoc(doc(db, "office_config", "colorRules_" + myId), rules); } catch (e) {}
+  };
+  const saveNotifSettings = async (next) => {
+    setNotifSettings(next);
+    try { await setDoc(doc(db, "office_config", "notif_" + myId), next); } catch (e) {}
   };
   const toggleFav = async (caseId) => {
     const cur = favCases || [];
@@ -1942,9 +2044,36 @@ function App() {
   // 실시간: 쪽지 (새로고침 없이 즉시 반영)
   useEffect(() => {
     if (!user || !profile) return;
+    const mid = profile?.legacyStaffId || user?.uid;
     const unsub = onSnapshot(collection(db, "office_messages"), (snap) => {
       const ms = []; snap.forEach((d) => ms.push({ id: d.id, ...d.data() }));
       setMessages(ms);
+      // ---- 새 쪽지 알림 감지 ----
+      // 내가 받는 쪽지(내가 수신자, 내가 보낸 게 아님, 취소/삭제 안 됨)
+      const inboxForMe = ms.filter((m) =>
+        Array.isArray(m.toIds) && m.toIds.includes(mid) &&
+        m.fromId !== mid && !m.unsent &&
+        !(m.trashedBy && m.trashedBy[mid])
+      );
+      if (seenMsgIdsRef.current === null) {
+        // 첫 스냅샷 = 기준선. 기존 쪽지엔 알림 안 울림.
+        seenMsgIdsRef.current = new Set(inboxForMe.map((m) => m.id));
+        return;
+      }
+      const fresh = inboxForMe.filter((m) => !seenMsgIdsRef.current.has(m.id));
+      fresh.forEach((m) => seenMsgIdsRef.current.add(m.id));
+      if (fresh.length > 0) {
+        const nameOf = (id) => (notifStaffRef.current || []).find((s) => s.id === id)?.name || "";
+        if (fresh.length === 1) {
+          const m = fresh[0];
+          const who = m.fromName || nameOf(m.fromId) || "누군가";
+          const kind = m.isTask ? "업무요청" : "전달";
+          const preview = (m.body || "").replace(/\s+/g, " ").trim().slice(0, 40);
+          fireDesktopNotif("새 쪽지", `${who} · ${kind}: ${preview}`, notifCfgRef.current);
+        } else {
+          fireDesktopNotif("새 쪽지", `새 쪽지 ${fresh.length}건이 도착했어요`, notifCfgRef.current);
+        }
+      }
     }, () => {});
     return unsub;
   }, [user, profile]);
@@ -1952,9 +2081,34 @@ function App() {
   // 실시간: 개인/공유 일정 (새로고침 없이 즉시 반영)
   useEffect(() => {
     if (!user || !profile) return;
+    const mid = profile?.legacyStaffId || user?.uid;
     const unsub = onSnapshot(collection(db, "office_schedules"), (snap) => {
       const arr = []; snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
       setSchedules(arr);
+      // ---- 새 공유일정 알림 감지 ----
+      // 남이 나에게 공유한 일정 (owner가 내가 아님, 공유대상에 내가 포함)
+      const sharedToMe = arr.filter((s) =>
+        s.ownerId && s.ownerId !== mid &&
+        Array.isArray(s.sharedWith) && s.sharedWith.includes(mid)
+      );
+      if (seenSchedIdsRef.current === null) {
+        seenSchedIdsRef.current = new Set(sharedToMe.map((s) => s.id));
+        return;
+      }
+      const fresh = sharedToMe.filter((s) => !seenSchedIdsRef.current.has(s.id));
+      fresh.forEach((s) => seenSchedIdsRef.current.add(s.id));
+      if (fresh.length > 0) {
+        const nameOf = (id) => (notifStaffRef.current || []).find((x) => x.id === id)?.name || "";
+        if (fresh.length === 1) {
+          const s = fresh[0];
+          const who = nameOf(s.ownerId) || "누군가";
+          const when = s.date ? String(s.date).slice(0, 10) : "";
+          const what = (s.title || "일정").slice(0, 30);
+          fireDesktopNotif("새 공유 일정", `${who}님: ${what}${when ? " (" + when + ")" : ""}`, notifCfgRef.current);
+        } else {
+          fireDesktopNotif("새 공유 일정", `새로 공유된 일정 ${fresh.length}건`, notifCfgRef.current);
+        }
+      }
     }, () => {});
     return unsub;
   }, [user, profile]);
@@ -1990,6 +2144,17 @@ function App() {
       } catch (e) {} // dev 모드에서 실패 = 정상
     };
     doCheck();
+  }, [user, profile]);
+
+  // 알림 권한 미리 확보 (첫 알림 놓침 방지). Windows는 기본 허용.
+  useEffect(() => {
+    if (!user || !profile) return;
+    (async () => {
+      try {
+        const granted = await isPermissionGranted();
+        if (!granted) await requestPermission();
+      } catch (e) {}
+    })();
   }, [user, profile]);
 
   // 현재 사용자 식별 (사무실앱과 동일: legacyStaffId 우선)
@@ -2298,6 +2463,8 @@ function App() {
             trashLogs={trashLogs}
             isAdmin={myRole === "admin"}
             onAddTodo={addTodo}
+            notifSettings={notifSettings}
+            onSaveNotif={saveNotifSettings}
           />
         )}
       </div>

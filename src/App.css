@@ -1708,3 +1708,50 @@ body {
 
 /* 휴지통 방향(받은/보낸) 뱃지 */
 .msg-badge.gray-badge { background: rgba(255,255,255,0.12); color: #b8b8bd; }
+
+/* ========================================================= */
+/* ↓↓↓ v0.1.11 추가분 (데스크톱 알림 설정) ↓↓↓ */
+/* ========================================================= */
+.notif-settings { display: flex; flex-direction: column; gap: 10px; }
+.notif-help {
+  font-size: 11.5px;
+  color: #9a9aa0;
+  line-height: 1.5;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+.notif-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 11px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 10px;
+}
+.notif-row.disabled { opacity: 0.45; }
+.notif-row-label { display: flex; flex-direction: column; gap: 2px; }
+.notif-row-title { font-size: 13px; color: #f2f2f5; font-weight: 600; }
+.notif-row-desc { font-size: 11px; color: #8a8a90; }
+.notif-switch {
+  flex-shrink: 0;
+  min-width: 54px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.06);
+  color: #9a9aa0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.notif-switch:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+.notif-switch.on {
+  background: #30d158;
+  border-color: #30d158;
+  color: #0b2e16;
+}
+.notif-switch.on:hover:not(:disabled) { background: #2fc954; }
+.notif-switch:disabled { cursor: default; }
