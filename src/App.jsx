@@ -19,12 +19,22 @@ import "./App.css";
 
 const KoreanLunarCalendar = (KoreanLunarCalendarPkg && KoreanLunarCalendarPkg.default) ? KoreanLunarCalendarPkg.default : KoreanLunarCalendarPkg;
 
-const appWindow = getCurrentWindow();
+// 플랫폼 감지: PC(Tauri 데스크톱) vs 휴대폰/웹. 같은 코드가 양쪽에서 돌게 함.
+const IS_TAURI = typeof window !== "undefined" && !!(window.__TAURI_INTERNALS__ || window.__TAURI__);
+// PC에선 실제 창 객체, 폰/웹에선 null (창 제어 코드는 이미 try/catch로 감싸져 있어 자동으로 건너뜀)
+const appWindow = IS_TAURI ? getCurrentWindow() : null;
 const APP_URL = "https://office-app-plum.vercel.app";
-const openCase = (caseId) => { try { openUrl(`${APP_URL}/?case=${encodeURIComponent(caseId)}`); } catch (e) {} };
+// 외부 링크 열기: PC(Tauri)는 기본 브라우저로, 폰/웹은 새 탭으로
+const openExternal = (url) => {
+  try {
+    if (IS_TAURI) { openUrl(url); }
+    else if (typeof window !== "undefined") { window.open(url, "_blank"); }
+  } catch (e) {}
+};
+const openCase = (caseId) => openExternal(`${APP_URL}/?case=${encodeURIComponent(caseId)}`);
 const openFilter = (special, scope) => {
   const q = scope ? `?filter=${special}&scope=${scope}` : `?filter=${special}`;
-  try { openUrl(`${APP_URL}/${q}`); } catch (e) {}
+  openExternal(`${APP_URL}/${q}`);
 };
 
 /* ===== 데스크톱 알림 (작업표시줄 깜빡임 + 우측하단 팝업 + 알림음) ===== */
