@@ -118,6 +118,32 @@ function solarToLunar(ds) {
   } catch (e) { return null; }
 }
 
+// '몇째 주 무슨 요일' 반복용 라벨/계산
+const WEEKDAY_KR = ["일", "월", "화", "수", "목", "금", "토"];
+function ordinalKr(ord) { return ord === -1 ? "마지막" : (["", "첫째", "둘째", "셋째", "넷째"][ord] || `${ord}째`); }
+// 기준 날짜(YYYY-MM-DD)로부터 요일(0~6)과 순번(1~4, 5번째는 -1=마지막) 계산
+function weekdayInfoOf(dateStr8) {
+  if (!dateStr8) return { weekday: 0, ordinal: 1 };
+  const bd = Number(dateStr8.split("-")[2]);
+  const wd = new Date(dateStr8 + "T00:00:00").getDay();
+  let ord = Math.ceil(bd / 7);
+  if (ord >= 5) ord = -1; // 5번째는 매달 없을 수 있으니 '마지막'으로
+  return { weekday: wd, ordinal: ord };
+}
+// 특정 연/월의 'ord번째 weekday' 날짜(일)를 반환. ord=-1이면 마지막. 없으면 null.
+function nthWeekdayDay(y, m /*1-12*/, weekday, ord) {
+  if (ord === -1) {
+    const lastDate = new Date(y, m, 0); // m월 마지막 날
+    const diff = (lastDate.getDay() - weekday + 7) % 7;
+    return lastDate.getDate() - diff;
+  }
+  const first = new Date(y, m - 1, 1);
+  const offset = (weekday - first.getDay() + 7) % 7;
+  const day = 1 + offset + (ord - 1) * 7;
+  const dim = new Date(y, m, 0).getDate();
+  return day <= dim ? day : null;
+}
+
 // 반복 일정을 창(window) 범위 안에서 실제 날짜들로 펼침
 function expandRecurrences(s, winStart, winEnd) {
   const base = s.date;
@@ -128,12 +154,26 @@ function expandRecurrences(s, winStart, winEnd) {
   const out = [];
   const sY = Number(winStart.slice(0, 4)), eY = Number(winEnd.slice(0, 4));
   if (rep === "yearly") {
-    for (let y = sY; y <= eY; y++) {
-      if (isValidYMD(y, bm, bd)) { const ds = ymd(y, bm, bd); if (ds >= winStart && ds <= winEnd) out.push(ds); }
+    if (s.repeatMode === "weekday" && s.weekday != null && s.weekOrdinal) {
+      for (let y = sY; y <= eY; y++) {
+        const day = nthWeekdayDay(y, bm, s.weekday, s.weekOrdinal);
+        if (day) { const ds = ymd(y, bm, day); if (ds >= winStart && ds <= winEnd) out.push(ds); }
+      }
+    } else {
+      for (let y = sY; y <= eY; y++) {
+        if (isValidYMD(y, bm, bd)) { const ds = ymd(y, bm, bd); if (ds >= winStart && ds <= winEnd) out.push(ds); }
+      }
     }
   } else if (rep === "monthly") {
-    for (let y = sY; y <= eY; y++) for (let m = 1; m <= 12; m++) {
-      if (isValidYMD(y, m, bd)) { const ds = ymd(y, m, bd); if (ds >= winStart && ds <= winEnd) out.push(ds); }
+    if (s.repeatMode === "weekday" && s.weekday != null && s.weekOrdinal) {
+      for (let y = sY; y <= eY; y++) for (let m = 1; m <= 12; m++) {
+        const day = nthWeekdayDay(y, m, s.weekday, s.weekOrdinal);
+        if (day) { const ds = ymd(y, m, day); if (ds >= winStart && ds <= winEnd) out.push(ds); }
+      }
+    } else {
+      for (let y = sY; y <= eY; y++) for (let m = 1; m <= 12; m++) {
+        if (isValidYMD(y, m, bd)) { const ds = ymd(y, m, bd); if (ds >= winStart && ds <= winEnd) out.push(ds); }
+      }
     }
   } else if (rep === "weekly") {
     const baseDate = new Date(base + "T00:00:00");
@@ -642,6 +682,7 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
   const [allDay, setAllDay] = useState(init.allDay !== undefined ? !!init.allDay : true);
   const [time, setTime] = useState(init.time || "09:00");
   const [repeat, setRepeat] = useState(init.repeat || "none");
+  const [repeatMode, setRepeatMode] = useState(init.repeatMode || "date"); // 'date'(지정날짜) | 'weekday'(몇째주 요일)
   const [memo, setMemo] = useState(init.memo || "");
   const [v, setV] = useState({ visibility: init.visibility || "private", sharedWith: init.sharedWith || [], team: init.team || myTeam || "" });
   const [busy, setBusy] = useState(false);
@@ -658,6 +699,8 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
     if (repeat === "lunar_yearly" && !lunarInfo) { setErr("선택한 날짜를 음력으로 변환할 수 없어요. 다른 날짜를 골라 주세요."); return; }
     setBusy(true); setErr("");
     const endVal = repeat !== "none" ? d : (endD && endD >= d ? endD : d);
+    const useWeekday = (repeat === "monthly" || repeat === "yearly") && repeatMode === "weekday";
+    const winfo = useWeekday ? weekdayInfoOf(d) : null;
     const payload = {
       title: title.trim(),
       date: d,
@@ -665,6 +708,9 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
       allDay,
       time: allDay ? null : time,
       repeat,
+      repeatMode: useWeekday ? "weekday" : "date",
+      weekday: winfo ? winfo.weekday : null,
+      weekOrdinal: winfo ? winfo.ordinal : null,
       lunarMonth: lunarInfo ? lunarInfo.month : null,
       lunarDay: lunarInfo ? lunarInfo.day : null,
       lunarLeap: lunarInfo ? !!lunarInfo.leap : false,
@@ -713,6 +759,25 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
         <option value="yearly">매년 (양력)</option>
         <option value="lunar_yearly">매년 (음력)</option>
       </select>
+      {(repeat === "monthly" || repeat === "yearly") && (() => {
+        const bdNum = Number(d.split("-")[2]);
+        const bmNum = Number(d.split("-")[1]);
+        const wi = weekdayInfoOf(d);
+        const period = repeat === "yearly" ? "매년" : "매월";
+        const dateLabel = repeat === "yearly" ? `${bmNum}월 ${bdNum}일` : `${bdNum}일`;
+        const wdLabel = repeat === "yearly"
+          ? `${bmNum}월 ${ordinalKr(wi.ordinal)} ${WEEKDAY_KR[wi.weekday]}요일`
+          : `${ordinalKr(wi.ordinal)} ${WEEKDAY_KR[wi.weekday]}요일`;
+        return (
+          <>
+            <div className="msg-kind-row">
+              <button type="button" className={"msg-kind-btn" + (repeatMode === "date" ? " on" : "")} onClick={() => setRepeatMode("date")}>{dateLabel}</button>
+              <button type="button" className={"msg-kind-btn" + (repeatMode === "weekday" ? " on" : "")} onClick={() => setRepeatMode("weekday")}>{wdLabel}</button>
+            </div>
+            <div className="af-hint">{period} {repeatMode === "weekday" ? wdLabel : dateLabel}에 반복돼요</div>
+          </>
+        );
+      })()}
       {repeat === "lunar_yearly" && (() => {
         const lu = solarToLunar(d);
         return <div className="af-hint">{lu ? `매년 음력 ${lu.month}월 ${lu.day}일${lu.leap ? " (윤달)" : ""}에 반복돼요` : "이 날짜는 음력 변환 범위를 벗어났어요"}</div>;
