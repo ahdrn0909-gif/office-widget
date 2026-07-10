@@ -1703,7 +1703,7 @@ function App() {
   const [cases, setCases] = useState([]);         // office_cases
   const [schedules, setSchedules] = useState([]); // office_schedules
   const [messages, setMessages] = useState([]);   // office_messages
-  const [colorRules, setColorRules] = useState(null); // office_config/colorRules
+  const [colorRules, setColorRules] = useState(null); // office_config/colorRules_<myId> (계정별)
   const [favCases, setFavCases] = useState([]);       // office_config/fav_<myId>
   const [todos, setTodos] = useState([]);             // office_config/todos_<myId>
   const [calSeen, setCalSeen] = useState(null);       // office_config/calseen_<myId> {baseline, ids}
@@ -1792,8 +1792,20 @@ function App() {
     }
     const mid = profile?.legacyStaffId || user?.uid;
     try {
-      const crSnap = await getDoc(doc(db, "office_config", "colorRules"));
-      setColorRules(crSnap.exists() ? crSnap.data() : DEFAULT_COLOR_RULES);
+      // 색상규칙은 계정별로 독립 저장 (colorRules_<myId>). 서로 덮어쓰지 않게 함.
+      const crSnap = await getDoc(doc(db, "office_config", "colorRules_" + mid));
+      if (crSnap.exists()) {
+        setColorRules(crSnap.data());
+      } else {
+        // 마이그레이션: 예전 공용 colorRules 문서가 있으면 내 계정 문서로 1회 복사 (기존 설정 유실 방지)
+        let seedRules = DEFAULT_COLOR_RULES;
+        try {
+          const oldSnap = await getDoc(doc(db, "office_config", "colorRules"));
+          if (oldSnap.exists()) seedRules = oldSnap.data();
+        } catch (e) {}
+        setColorRules(seedRules);
+        try { await setDoc(doc(db, "office_config", "colorRules_" + mid), seedRules); } catch (e) {}
+      }
     } catch (e) { setColorRules(DEFAULT_COLOR_RULES); }
     try {
       const fvSnap = await getDoc(doc(db, "office_config", "fav_" + mid));
@@ -1866,7 +1878,7 @@ function App() {
 
   const saveColorRules = async (rules) => {
     setColorRules(rules);
-    try { await setDoc(doc(db, "office_config", "colorRules"), rules); } catch (e) {}
+    try { await setDoc(doc(db, "office_config", "colorRules_" + myId), rules); } catch (e) {}
   };
   const toggleFav = async (caseId) => {
     const cur = favCases || [];
