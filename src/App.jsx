@@ -12,7 +12,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { doc, getDoc, collection, getDocs, writeBatch, addDoc, deleteDoc, updateDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, writeBatch, addDoc, deleteDoc, updateDoc, setDoc, onSnapshot, deleteField } from "firebase/firestore";
 import KoreanLunarCalendarPkg from "korean-lunar-calendar";
 import { auth, db } from "./firebase";
 import "./App.css";
@@ -1250,7 +1250,7 @@ function msgInTrash(m, uid) {
   if (m.trashed && m.fromId === uid) return true; // 구버전 전역 trashed = 보낸사람 휴지통
   return false;
 }
-function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onUnsend, onTrashMine, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif }) {
+function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onMarkUndone, onUnsend, onTrashMine, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif }) {
   const [openId, setOpenId] = useState(null);
   const [delId, setDelId] = useState(null);
   const [inboxAll, setInboxAll] = useState(false);
@@ -1317,7 +1317,10 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
             <div className="msg-text">{m.body}</div>
             {isTask ? (
               done ? (
-                <span className="memo-saved">처리완료했어요 ✓ ({fmtMsgTime(m.done[myId])})</span>
+                <div className="msg-step">
+                  <span className="memo-saved">처리완료했어요 ✓ ({fmtMsgTime(m.done[myId])})</span>
+                  <button className="nv-btn" onClick={() => onMarkUndone(m.id)}>처리완료 취소</button>
+                </div>
               ) : read ? (
                 <div className="msg-step">
                   <span className="memo-saved">확인함 ✓ ({fmtMsgTime(m.reads[myId])})</span>
@@ -1535,7 +1538,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         </>
       )}
 
-      <div className="sec-label msg-sec">보낸 쪽지{sentPendingCount > 0 ? <span className="sec-cnt">{sentPendingCount}</span> : null}</div>
+      <div className="sec-label msg-sec">보낸 쪽지</div>
       {sent.length === 0 ? <div className="empty">보낸 쪽지 없음</div> : (
         <>
           {sentShown.map(renderSentItem)}
@@ -1936,6 +1939,16 @@ function App() {
   };
   const markRead = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["reads." + myId]: Date.now() }); } catch (e) {} };
   const markDone = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["done." + myId]: Date.now() }); } catch (e) {} };
+  // 처리완료 취소 = done만 제거(확인함은 유지) → 발신인 화면도 '확인함'으로 되돌아감. 연동 할일이 있으면 체크도 해제.
+  const markUndone = async (id) => {
+    try { await updateDoc(doc(db, "office_messages", id), { ["done." + myId]: deleteField() }); } catch (e) {}
+    const hasLinked = (todos || []).some((t) => t.srcMsgId === id && t.done);
+    if (hasLinked) {
+      const next = (todos || []).map((t) => (t.srcMsgId === id ? { ...t, done: false } : t));
+      setTodos(next);
+      await persistTodos(next);
+    }
+  };
   const deleteMessage = async (id) => { try { await deleteDoc(doc(db, "office_messages", id)); } catch (e) {} };
   // 보내기 취소 (수신자 확인 전) = 수신자에게서도 사라짐 + 내 휴지통으로
   const unsendMessage = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { unsent: true, ["trashedBy." + myId]: Date.now() }); } catch (e) {} };
@@ -2001,12 +2014,21 @@ function App() {
   };
   const toggleTodo = async (id) => {
     const cur = (todos || []).find((t) => t.id === id);
+    const willBeDone = cur ? !cur.done : true;
     const next = (todos || []).map((t) => (t.id === id ? { ...t, done: !t.done } : t));
     setTodos(next);
     await persistTodos(next);
-    // 쪽지에서 등록한 할일을 '완료'로 바꾸면 → 원본 받은쪽지도 자동 확인함+처리완료 (발신인에게 연동)
-    if (cur && !cur.done && cur.srcMsgId) {
-      try { await updateDoc(doc(db, "office_messages", cur.srcMsgId), { ["reads." + myId]: Date.now(), ["done." + myId]: Date.now() }); } catch (e) {}
+    // 쪽지에서 등록한 할일 ↔ 원본 받은쪽지 양방향 연동
+    if (cur && cur.srcMsgId) {
+      try {
+        if (willBeDone) {
+          // 완료 → 원본 받은쪽지 자동 확인함+처리완료 (발신인에게 처리완료로 표시)
+          await updateDoc(doc(db, "office_messages", cur.srcMsgId), { ["reads." + myId]: Date.now(), ["done." + myId]: Date.now() });
+        } else {
+          // 완료 해제 → 원본 받은쪽지 처리완료만 취소, 확인함은 유지 (발신인 화면도 '확인함'으로 되돌아감)
+          await updateDoc(doc(db, "office_messages", cur.srcMsgId), { ["done." + myId]: deleteField() });
+        }
+      } catch (e) {}
     }
   };
   const editTodo = async (id, { title, body }) => {
@@ -2457,6 +2479,7 @@ function App() {
             onSend={sendMessage}
             onMarkRead={markRead}
             onMarkDone={markDone}
+            onMarkUndone={markUndone}
             onUnsend={unsendMessage}
             onTrashMine={trashMine}
             onEmptyTrash={emptyTrash}
