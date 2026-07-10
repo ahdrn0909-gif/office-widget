@@ -2414,6 +2414,37 @@ function App() {
     <div className="drag-bar" {...(pinned ? {} : { "data-tauri-drag-region": true })}>{children}</div>
   );
 
+  // ── 홈위젯(안드로이드) 요약 데이터 계산 ──
+  // 진행중 / 확인필요(계산서·사건번호·분할납미납 합) / 임박마감(7일이내) / 미완료 할일 / 안읽은 쪽지
+  const widgetSummary = useMemo(() => {
+    const s = summarize(myCases);
+    const todayStr = dateStr(new Date());
+    const soonStr = addDaysStr(todayStr, 7);
+    const imminent = (s.deadlines || []).filter((d) => {
+      const dd = String(d.date || "").slice(0, 10);
+      return dd >= todayStr && dd <= soonStr;
+    }).length;
+    const needCheck = s.invoiceNeeded.length + s.caseNoNeeded.length + s.overdue.length;
+    const todoOpen = (todos || []).filter((t) => !t.done).length;
+    return {
+      inProgress: s.inProgress.length,
+      needCheck,
+      deadline: imminent,
+      todo: todoOpen,
+      unread: unreadCount,
+    };
+  }, [myCases, todos, unreadCount]);
+
+  // ── 홈위젯 요약을 Capacitor Preferences(안드로이드 SharedPreferences "CapacitorStorage")에 저장 ──
+  // 폰 앱(Capacitor)에서만 동작. PC 위젯(Tauri)·일반 브라우저에서는 window.Capacitor가 없어 조용히 건너뜀.
+  useEffect(() => {
+    const P = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Preferences;
+    if (!P) return;
+    try {
+      P.set({ key: "officeWidgetSummary", value: JSON.stringify({ ...widgetSummary, updatedAt: Date.now() }) });
+    } catch (e) {}
+  }, [widgetSummary]);
+
   if (checking) {
     return (
       <div className="widget" style={{ background: bg }}>
