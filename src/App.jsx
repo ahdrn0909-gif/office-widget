@@ -2445,6 +2445,33 @@ function App() {
     } catch (e) {}
   }, [widgetSummary]);
 
+  // ── 홈 달력 위젯용 날짜별 일정 데이터 (폰 전용) ──
+  // eventsByDate를 { "YYYY-MM-DD": [{t:제목, c:색, a:종일}] } 로 압축. 앞뒤 1년 범위만.
+  const calendarData = useMemo(() => {
+    const out = {};
+    const today = new Date();
+    const lo = dateStr(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+    const hi = dateStr(new Date(today.getFullYear() + 1, today.getMonth() + 1, 0));
+    Object.keys(eventsByDate || {}).forEach((k) => {
+      if (k < lo || k > hi) return;
+      const list = (eventsByDate[k] || []).slice(0, 6).map((e) => ({
+        t: String(e.chip || e.label || "").slice(0, 12),
+        c: e.color || "#888888",
+        a: e.allDay ? 1 : 0,
+      }));
+      if (list.length) out[k] = list;
+    });
+    return out;
+  }, [eventsByDate]);
+
+  useEffect(() => {
+    const P = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Preferences;
+    if (!P) return;
+    try {
+      P.set({ key: "officeCalendarData", value: JSON.stringify(calendarData) });
+    } catch (e) {}
+  }, [calendarData]);
+
   // ── 앱 자동 업데이트 (폰 전용) ──
   const [update, setUpdate] = useState(null);   // { name, url }
   const [updBusy, setUpdBusy] = useState(false);
