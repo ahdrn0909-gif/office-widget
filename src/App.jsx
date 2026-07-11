@@ -2445,6 +2445,39 @@ function App() {
     } catch (e) {}
   }, [widgetSummary]);
 
+  // ── 앱 자동 업데이트 (폰 전용) ──
+  const [update, setUpdate] = useState(null);   // { name, url }
+  const [updBusy, setUpdBusy] = useState(false);
+
+  useEffect(() => {
+    const U = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Updater;
+    if (!U) return; // PC 위젯·브라우저에서는 건너뜀
+    let cancelled = false;
+    (async () => {
+      try {
+        const cur = await U.getCurrentVersion();
+        const res = await U.fetchText({ url: "https://github.com/ahdrn0909-gif/office-mobile/releases/latest/download/version.json" });
+        const remote = JSON.parse(res.text);
+        if (!cancelled && remote && typeof remote.versionCode === "number"
+            && remote.versionCode > Number(cur.versionCode)) {
+          setUpdate({ name: remote.versionName || ("v" + remote.versionCode), url: remote.apkUrl });
+        }
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const doUpdate = async () => {
+    const U = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Updater;
+    if (!U || !update) return;
+    try {
+      setUpdBusy(true);
+      await U.downloadAndInstall({ url: update.url });
+    } catch (e) {
+      setUpdBusy(false);
+    }
+  };
+
   if (checking) {
     return (
       <div className="widget" style={{ background: bg }}>
@@ -2490,6 +2523,20 @@ function App() {
 
   return (
     <div className="widget" style={{ background: bg }}>
+      {update && (
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 9999,
+          background: "#2563eb", color: "#fff", padding: "8px 12px",
+          display: "flex", alignItems: "center", gap: 8, fontSize: 13, boxSizing: "border-box" }}>
+          <span style={{ flex: 1 }}>새 버전 {update.name} 나왔어요</span>
+          <button onClick={doUpdate} disabled={updBusy}
+            style={{ background: "#fff", color: "#2563eb", border: "none",
+              borderRadius: 6, padding: "4px 10px", fontWeight: 600, cursor: "pointer" }}>
+            {updBusy ? "다운로드 중..." : "업데이트"}
+          </button>
+          <button onClick={() => setUpdate(null)}
+            style={{ background: "transparent", color: "#fff", border: "none", cursor: "pointer", fontSize: 15 }}>✕</button>
+        </div>
+      )}
       {showHeader ? (
         <div className="widget-header" {...(pinned ? {} : { "data-tauri-drag-region": true })}>
           <div className="tabs">
