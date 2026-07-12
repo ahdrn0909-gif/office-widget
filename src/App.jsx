@@ -2505,32 +2505,23 @@ function App() {
     }
   };
 
-  // ── 푸시 알림 토큰 등록 (폰 전용) — 진단 버전 ──
-  const [pushDiag, setPushDiag] = useState("");
+  // ── 푸시 알림 토큰 등록 (폰 전용) ──
+  // 로그인되면 알림 권한 요청 → FCM 토큰 받아 Firestore(office_push_tokens)에 저장
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hasCap = !!window.Capacitor;
-    const plugins = window.Capacitor && window.Capacitor.Plugins ? Object.keys(window.Capacitor.Plugins).join(",") : "(none)";
-    const PN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
-    if (!hasCap) { setPushDiag("Cap=NO (PC/브라우저)"); return; }
-    if (!PN) { setPushDiag("PN=NO | plugins=[" + plugins + "]"); return; }
-    if (!myId) { setPushDiag("myId=NO (로그인대기)"); return; }
-    setPushDiag("PN=OK, myId=" + myId + " → 권한확인중...");
+    const PN = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+    if (!PN || !myId) return;
     let regHandle, errHandle;
     (async () => {
       try {
         let perm = await PN.checkPermissions();
-        setPushDiag("perm.receive=" + perm.receive);
         if (perm.receive === "prompt" || perm.receive === "prompt-with-rationale") {
           perm = await PN.requestPermissions();
-          setPushDiag("요청후 perm.receive=" + perm.receive);
         }
-        if (perm.receive !== "granted") { setPushDiag("권한거부됨: " + perm.receive); return; }
+        if (perm.receive !== "granted") return;
         regHandle = await PN.addListener("registration", async (token) => {
           try {
             const val = token && (token.value || token.token);
-            if (!val) { setPushDiag("토큰값 없음"); return; }
-            setPushDiag("토큰받음: " + String(val).slice(0, 16) + "... 저장중");
+            if (!val) return;
             await setDoc(doc(db, "office_push_tokens", val), {
               staffId: myId,
               name: profile?.name || user?.email || "",
@@ -2538,19 +2529,11 @@ function App() {
               platform: "android",
               updatedAt: Date.now(),
             });
-            setPushDiag("저장성공! staffId=" + myId);
-          } catch (e) {
-            setPushDiag("저장실패: " + (e && e.message ? e.message : String(e)));
-          }
+          } catch (e) {}
         });
-        errHandle = await PN.addListener("registrationError", (err) => {
-          setPushDiag("등록에러: " + JSON.stringify(err));
-        });
+        errHandle = await PN.addListener("registrationError", () => {});
         await PN.register();
-        setPushDiag("register() 호출완료, 토큰대기중...");
-      } catch (e) {
-        setPushDiag("예외: " + (e && e.message ? e.message : String(e)));
-      }
+      } catch (e) {}
     })();
     return () => {
       try { if (regHandle && regHandle.remove) regHandle.remove(); } catch (e) {}
@@ -2603,14 +2586,6 @@ function App() {
 
   return (
     <div className="widget" style={{ background: bg }}>
-      {pushDiag && (
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 99999,
-          background: "#111", color: "#0f0", padding: "6px 8px", fontSize: 11,
-          fontFamily: "monospace", wordBreak: "break-all", boxSizing: "border-box",
-          borderBottom: "1px solid #333" }}>
-          [PUSH] {pushDiag}
-        </div>
-      )}
       {update && (
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 9999,
           background: "#2563eb", color: "#fff", padding: "8px 12px",
