@@ -1128,8 +1128,7 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
                     e.allDay ? (
                       <div key={j} className="ev-chip filled" style={{ background: e.color }}>{e.chip}</div>
                     ) : (
-                      <div key={j} className="ev-chip">
-                        <span className="ev-dot" style={{ background: e.color }} />
+                      <div key={j} className="ev-chip" style={{ borderLeftColor: e.color }}>
                         <span className="ev-chip-t">{e.chip}</span>
                       </div>
                     )
@@ -1368,24 +1367,6 @@ function msgInTrash(m, uid) {
 function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onMarkUndone, onUnsend, onTrashMine, onRestore, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif }) {
   const [openId, setOpenId] = useState(null);
   const [delId, setDelId] = useState(null);
-  const [copiedId, setCopiedId] = useState(null);  // #5 복사 완료 표시
-  // #5 쪽지 내용 탭/클릭 → 클립보드 복사
-  const copyBody = async (m) => {
-    const text = (m && m.body) || "";
-    if (!text) return;
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-        document.body.appendChild(ta); ta.focus(); ta.select();
-        document.execCommand("copy"); document.body.removeChild(ta);
-      }
-      setCopiedId(m.id);
-      setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1500);
-    } catch (e) {}
-  };
   const [inboxAll, setInboxAll] = useState(false);
   const [sentAll, setSentAll] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -1447,8 +1428,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         </div>
         {open && (
           <div className="msg-body">
-            <div className="msg-text" onClick={() => copyBody(m)} title="탭하면 복사" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "pointer" }}>{m.body}</div>
-            <button className="msg-copy-btn" onClick={() => copyBody(m)}>{copiedId === m.id ? "복사됨 ✓" : "📋 내용 복사"}</button>
+            <div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div>
             {isTask ? (
               done ? (
                 <div className="msg-step">
@@ -1516,8 +1496,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         </div>
         {open && (
           <div className="msg-body">
-            <div className="msg-text" onClick={() => copyBody(m)} title="탭하면 복사" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "pointer" }}>{m.body}</div>
-            <button className="msg-copy-btn" onClick={() => copyBody(m)}>{copiedId === m.id ? "복사됨 ✓" : "📋 내용 복사"}</button>
+            <div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div>
             <div className="msg-status">
               {(m.toIds || []).map((tid) => {
                 const done = m.done && m.done[tid];
@@ -1592,11 +1571,8 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
               </div>
               {open && (
                 <div className="msg-body">
-                  <div className="msg-text" onClick={() => copyBody(m)} title="탭하면 복사" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "pointer" }}>{m.body}</div>
-                  <div className="msg-trash-actions">
-                    <button className="msg-copy-btn" onClick={() => copyBody(m)}>{copiedId === m.id ? "복사됨 ✓" : "📋 내용 복사"}</button>
-                    <button className="msg-restore-btn wide" onClick={() => onRestore(m.id)}>↩ 복구하기</button>
-                  </div>
+                  <div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div>
+                  <button className="msg-restore-btn wide" onClick={() => onRestore(m.id)}>↩ 복구하기</button>
                 </div>
               )}
             </div>

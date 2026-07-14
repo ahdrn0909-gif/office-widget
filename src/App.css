@@ -620,6 +620,8 @@ body {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   margin-bottom: 3px;
+  margin-left: -12px;
+  margin-right: -12px;
 }
 .cal-wd {
   text-align: center;
@@ -634,6 +636,8 @@ body {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 1px;
+  margin-left: -12px;
+  margin-right: -12px;
 }
 .cal-cell {
   min-height: clamp(64px, 12vw, 100px);
@@ -702,18 +706,15 @@ body {
   font-weight: 500;
 }
 .ev-chip:not(.filled) {
-  display: flex;
-  align-items: center;
-  gap: 2px;
   color: #d8d8dc;
+  border-left: 3px solid currentColor;   /* 색은 인라인 borderLeftColor로 지정 */
+  border-radius: 0 3px 3px 0;
+  padding: 1px 2px 1px 4px;
+  overflow: hidden;
 }
-.ev-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+.ev-dot { display: none; }   /* 점 폐기(작대기로 대체) */
 .ev-chip-t {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
