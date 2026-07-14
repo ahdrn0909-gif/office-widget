@@ -715,6 +715,37 @@ body {
 .dot.accept { background: #0a84ff; }
 .dot.schedule { background: #30d158; }
 
+/* #4 당겨접기 핸들 (달력 아래 손잡이) */
+.cal-handle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  margin-top: 6px;
+  padding: 7px 0 4px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;            /* 핸들 위 드래그는 네이티브 스크롤 대신 접기로 */
+  border-radius: 8px;
+}
+.cal-handle:hover { background: rgba(255,255,255,0.05); }
+.cal-handle-grip {
+  width: 38px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.28);
+}
+.cal-handle:hover .cal-handle-grip { background: rgba(255,255,255,0.45); }
+.cal-handle-hint {
+  font-size: 11px;
+  color: #8e8e93;
+}
+
+/* 접힘 상태: 상세목록 숨기고 달력 칸 확대 */
+.cal-wrap.detail-hidden .cal-cell {
+  min-height: clamp(86px, 15.5vw, 148px);
+}
+
 .cal-detail {
   margin-top: 12px;
   border-top: 1px solid rgba(255,255,255,0.08);

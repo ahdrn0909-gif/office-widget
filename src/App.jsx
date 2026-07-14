@@ -1002,6 +1002,38 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
   const [expId, setExpId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
 
+  // #4 달력 당겨접기: 상세목록 접힘 상태(계정별 localStorage 저장)
+  const CAL_HIDE_KEY = "cal_detailHidden_" + (myId || "_");
+  const [detailHidden, setDetailHidden] = useState(() => {
+    try { return localStorage.getItem(CAL_HIDE_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(CAL_HIDE_KEY, detailHidden ? "1" : "0"); } catch {}
+  }, [CAL_HIDE_KEY, detailHidden]);
+
+  // 핸들 탭/드래그: 아래로 당기면 접힘, 위로 당기면 펴짐, 짧게 누르면 토글
+  const HANDLE_DRAG_PX = 40;
+  const handleStartY = useRef(0);
+  const handleTouched = useRef(false); // 터치 후 고스트 클릭 무시용
+  const onHandleTouchStart = (e) => {
+    e.stopPropagation();               // #3 가로스와이프(widget-body)와 분리
+    handleTouched.current = true;
+    handleStartY.current = e.touches[0].clientY;
+  };
+  const onHandleTouchEnd = (e) => {
+    e.stopPropagation();
+    const y1 = e.changedTouches[0]?.clientY ?? handleStartY.current;
+    const dy = y1 - handleStartY.current;
+    if (dy > HANDLE_DRAG_PX) setDetailHidden(true);        // 아래로 당김 → 접기
+    else if (dy < -HANDLE_DRAG_PX) setDetailHidden(false); // 위로 당김 → 펴기
+    else setDetailHidden((v) => !v);                        // 짧게 누름 → 토글
+    setTimeout(() => { handleTouched.current = false; }, 400);
+  };
+  const onHandleClick = () => {
+    if (handleTouched.current) return;  // 폰: 터치로 이미 처리됨
+    setDetailHidden((v) => !v);         // PC: 클릭 토글
+  };
+
   const ownerNameOf = (id) => ((staff || []).find((s) => s.id === id)?.name) || "누군가";
   const openAdd = () => { setEditDoc(null); setFormDate(sel); setShowForm(true); };
   // 날짜 칸 더블클릭 → 그 날짜로 일정추가 폼 열기
@@ -1037,7 +1069,7 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
   const selLabel = selObj ? `${selObj.getMonth() + 1}월 ${selObj.getDate()}일 (${WEEKDAYS[selObj.getDay()]})` : "";
 
   return (
-    <div className="cal-wrap">
+    <div className={"cal-wrap" + (detailHidden ? " detail-hidden" : "")}>
       {newShared && newShared.length > 0 && (
         <div className="cal-newshare">
           <div className="cal-newshare-head">
@@ -1112,6 +1144,18 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
         })}
       </div>
 
+      <div
+        className="cal-handle"
+        onClick={onHandleClick}
+        onTouchStart={onHandleTouchStart}
+        onTouchEnd={onHandleTouchEnd}
+        title={detailHidden ? "펼치기" : "접기 (달력 크게 보기)"}
+      >
+        <span className="cal-handle-grip" />
+        <span className="cal-handle-hint">{detailHidden ? "▾ 일정 목록 펴기" : "▴ 접고 달력 크게"}</span>
+      </div>
+
+      {!detailHidden && (
       <div className="cal-detail">
         <div className="cal-detail-head">
           <span className="cal-detail-date">{selLabel}</span>
@@ -1170,6 +1214,7 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
           })
         )}
       </div>
+      )}
 
       {showForm && (
         <div className="wg-modal-overlay" onClick={closeForm}>
@@ -1389,7 +1434,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         </div>
         {open && (
           <div className="msg-body">
-            <div className="msg-text">{m.body}</div>
+            <div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div>
             {isTask ? (
               done ? (
                 <div className="msg-step">
@@ -1424,7 +1469,9 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
             ) : (
               <button className="msg-todo-btn" onClick={() => openTodoForm(m)}>+ 해야할일 등록</button>
             )}
-            {delId === m.id ? (
+            {isTask && !done ? (
+              <span className="msg-del-locked">처리완료해야 삭제(휴지통 이동)할 수 있어요.</span>
+            ) : delId === m.id ? (
               <span className="ev-del-wrap">
                 <button className="ev-del yes" onClick={() => { onTrashMine(m.id); setDelId(null); }}>휴지통으로</button>
                 <button className="ev-del no" onClick={() => setDelId(null)}>취소</button>
@@ -1443,6 +1490,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
     const open = openId === m.id;
     const st = sentStatusOf(m);
     const anyRead = (m.toIds || []).some((id) => m.reads && m.reads[id]);
+    const allDone = (m.toIds || []).length > 0 && (m.toIds || []).every((id) => m.done && m.done[id]);
     return (
       <div className="msg-item" key={m.id}>
         <div className="msg-head" onClick={() => setOpenId(open ? null : m.id)}>
@@ -1454,7 +1502,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         </div>
         {open && (
           <div className="msg-body">
-            <div className="msg-text">{m.body}</div>
+            <div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div>
             <div className="msg-status">
               {(m.toIds || []).map((tid) => {
                 const done = m.done && m.done[tid];
@@ -1469,7 +1517,11 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
                 );
               })}
             </div>
-            {anyRead ? (
+            {isTask && !allDone ? (
+              <div className="msg-locked-row">
+                <span className="msg-del-locked">받는 사람 모두가 처리완료해야 삭제(휴지통 이동)할 수 있어요.</span>
+              </div>
+            ) : anyRead ? (
               <div className="msg-locked-row">
                 <span className="msg-del-locked">상대가 확인한 것은 보내기취소를 하지 못합니다.</span>
                 {delId === m.id ? (
@@ -1522,7 +1574,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
                 <span className="msg-preview">{m.body}</span>
                 <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
               </div>
-              {open && <div className="msg-body"><div className="msg-text">{m.body}</div></div>}
+              {open && <div className="msg-body"><div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div></div>}
             </div>
           );
         })}
@@ -1785,6 +1837,9 @@ function TodoRow({ t, onToggle, onDelete, onEdit, delId, setDelId, expanded, onT
           <span className="todo-title-txt">{t.title}</span>
           {t.body && <span className="todo-chev">{expanded ? "▴" : "▾"}</span>}
         </div>
+        {t.done && t.doneAt && (
+          <div className="todo-doneat" style={{ fontSize: 11, color: "#9A9AA0", marginTop: 2 }}>완료 {fmtMsgTime(t.doneAt)}</div>
+        )}
         {expanded && t.body && <div className="todo-body">{t.body}</div>}
       </div>
       <div className="todo-actions">
@@ -1808,10 +1863,11 @@ function TodoPanel({ todos, onAdd, onToggle, onEdit, onDelete }) {
   const [body, setBody] = useState("");
   const [delId, setDelId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [showDone, setShowDone] = useState(false);
   const toggleExpand = (id) => setExpandedId((cur) => (cur === id ? null : id));
   const list = todos || [];
   const undone = list.filter((t) => !t.done);
-  const doneList = list.filter((t) => t.done);
+  const doneList = list.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
   const add = async () => {
     if (!title.trim()) return;
     await onAdd({ title, body });
@@ -1841,8 +1897,13 @@ function TodoPanel({ todos, onAdd, onToggle, onEdit, onDelete }) {
             <TodoRow key={t.id} t={t} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} delId={delId} setDelId={setDelId}
               expanded={expandedId === t.id} onToggleExpand={toggleExpand} />
           ))}
-          {doneList.length > 0 && <div className="todo-done-label">완료됨 ({doneList.length})</div>}
-          {doneList.map((t) => (
+          {doneList.length > 0 && (
+            <button className="todo-done-label" onClick={() => setShowDone((s) => !s)}
+              style={{ background: "none", border: "none", padding: "6px 2px", width: "100%", textAlign: "left", cursor: "pointer", color: "inherit", font: "inherit" }}>
+              {showDone ? "▾" : "▸"} 완료됨 ({doneList.length})
+            </button>
+          )}
+          {showDone && doneList.map((t) => (
             <TodoRow key={t.id} t={t} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} delId={delId} setDelId={setDelId}
               expanded={expandedId === t.id} onToggleExpand={toggleExpand} />
           ))}
@@ -2019,7 +2080,7 @@ function App() {
     try { await updateDoc(doc(db, "office_messages", id), { ["done." + myId]: deleteField() }); } catch (e) {}
     const hasLinked = (todos || []).some((t) => t.srcMsgId === id && t.done);
     if (hasLinked) {
-      const next = (todos || []).map((t) => (t.srcMsgId === id ? { ...t, done: false } : t));
+      const next = (todos || []).map((t) => (t.srcMsgId === id ? { ...t, done: false, doneAt: null } : t));
       setTodos(next);
       await persistTodos(next);
     }
@@ -2090,7 +2151,7 @@ function App() {
   const toggleTodo = async (id) => {
     const cur = (todos || []).find((t) => t.id === id);
     const willBeDone = cur ? !cur.done : true;
-    const next = (todos || []).map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+    const next = (todos || []).map((t) => (t.id === id ? { ...t, done: !t.done, doneAt: !t.done ? Date.now() : null } : t));
     setTodos(next);
     await persistTodos(next);
     // 쪽지에서 등록한 할일 ↔ 원본 받은쪽지 양방향 연동
@@ -2346,7 +2407,7 @@ function App() {
     visibleSchedules.forEach((s) => {
       const vis = s.visibility || "private";
       const color = scheduleColor(s, myId, colorRules);
-      const chip = (s.allDay ? "" : (s.time ? s.time + " " : "")) + (s.title || "일정");
+      const chip = (s.title || "일정") + (s.allDay ? "" : (s.time ? " " + s.time : ""));
       const mine = s.ownerId === myId;
       const ownerName = mine ? "" : (staffName(s.ownerId) || "");
       const rep = s.repeat || "none";
@@ -2541,6 +2602,30 @@ function App() {
     };
   }, [myId]);
 
+  // ── 좌우 스와이프로 탭 전환 (폰) ──
+  const swipeRef = useRef(null);
+  const TAB_ORDER = ["cases", "calendar", "messages"];
+  const onBodyTouchStart = (e) => {
+    if (e.touches && e.touches.length === 1) {
+      swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
+    } else {
+      swipeRef.current = null;
+    }
+  };
+  const onBodyTouchEnd = (e) => {
+    const s = swipeRef.current; swipeRef.current = null;
+    if (!s || !e.changedTouches || !e.changedTouches.length) return;
+    const dx = e.changedTouches[0].clientX - s.x;
+    const dy = e.changedTouches[0].clientY - s.y;
+    if (Date.now() - s.t > 700) return;          // 너무 느린 동작 무시
+    if (Math.abs(dx) < 70) return;               // 이동 거리 부족
+    if (Math.abs(dx) < Math.abs(dy) * 1.8) return; // 세로 스크롤이면 무시
+    const idx = TAB_ORDER.indexOf(tab);
+    if (idx < 0) return;
+    if (dx < 0 && idx < TAB_ORDER.length - 1) setTab(TAB_ORDER[idx + 1]);      // 왼쪽으로 밀기 → 다음 탭
+    else if (dx > 0 && idx > 0) setTab(TAB_ORDER[idx - 1]);                    // 오른쪽으로 밀기 → 이전 탭
+  };
+
   if (checking) {
     return (
       <div className="widget" style={{ background: bg }}>
@@ -2650,7 +2735,7 @@ function App() {
         </div>
       )}
 
-      <div className="widget-body">
+      <div className="widget-body" onTouchStart={onBodyTouchStart} onTouchEnd={onBodyTouchEnd}>
         {tab === "cases" && (
           loadingData ? (
             <div className="empty" style={{ marginTop: 30 }}>사건 불러오는 중...</div>
