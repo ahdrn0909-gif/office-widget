@@ -188,6 +188,35 @@ body {
 }
 .msg-del:hover { text-decoration: underline; }
 
+/* #5 내용 복사 버튼 */
+.msg-copy-btn {
+  align-self: flex-start;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.06);
+  color: #cfcfd3;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.msg-copy-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+
+/* 휴지통 복구 버튼 */
+.msg-restore-btn {
+  margin-left: 8px;
+  flex-shrink: 0;
+  border: none;
+  background: rgba(48,209,88,0.16);
+  color: #4ecb71;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 9px;
+  border-radius: 6px;
+}
+.msg-restore-btn:hover { background: rgba(48,209,88,0.28); color: #7ee59a; }
+.msg-restore-btn.wide { margin-left: 0; padding: 4px 12px; }
+.msg-trash-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+
 .msg-compose { display: flex; flex-direction: column; gap: 8px; }
 .msg-ta {
   width: 100%;
@@ -608,7 +637,7 @@ body {
 }
 .cal-cell {
   min-height: clamp(64px, 12vw, 100px);
-  padding: 4px 3px;
+  padding: 3px 1px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -659,10 +688,10 @@ body {
   width: 100%;
 }
 .ev-chip {
-  font-size: clamp(10px, 1.6vw, 13px);
-  line-height: 1.35;
-  border-radius: 4px;
-  padding: 1px 5px;
+  font-size: clamp(9.5px, 1.5vw, 12px);
+  line-height: 1.3;
+  border-radius: 3px;
+  padding: 1px 3px;
   max-width: 100%;
 }
 .ev-chip.filled {
@@ -675,12 +704,12 @@ body {
 .ev-chip:not(.filled) {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   color: #d8d8dc;
 }
 .ev-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -715,35 +744,24 @@ body {
 .dot.accept { background: #0a84ff; }
 .dot.schedule { background: #30d158; }
 
-/* #4 당겨접기 핸들 (달력 아래 손잡이) */
-.cal-handle {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  margin-top: 6px;
-  padding: 7px 0 4px;
+/* #4 접기/펴기: PC용 미니 토글 힌트 (폰은 그리드에서 위/아래 스와이프) */
+.cal-collapse-hint {
+  text-align: center;
+  font-size: 10.5px;
+  color: #6f6f74;
+  padding: 5px 0 2px;
+  margin-top: 4px;
   cursor: pointer;
   user-select: none;
-  touch-action: none;            /* 핸들 위 드래그는 네이티브 스크롤 대신 접기로 */
-  border-radius: 8px;
 }
-.cal-handle:hover { background: rgba(255,255,255,0.05); }
-.cal-handle-grip {
-  width: 38px;
-  height: 4px;
-  border-radius: 3px;
-  background: rgba(255,255,255,0.28);
-}
-.cal-handle:hover .cal-handle-grip { background: rgba(255,255,255,0.45); }
-.cal-handle-hint {
-  font-size: 11px;
-  color: #8e8e93;
-}
+.cal-collapse-hint:hover { color: #9a9aa0; }
 
-/* 접힘 상태: 상세목록 숨기고 달력 칸 확대 */
+/* 그리드 위 세로 스와이프를 제스처로 쓰기 위해 네이티브 스크롤 차단 (가로 스와이프는 JS로 버블링됨) */
+.cal-grid { touch-action: none; }
+
+/* 접힘 상태: 상세목록 숨기고 달력 칸 확대(달력 전체화면 느낌) */
 .cal-wrap.detail-hidden .cal-cell {
-  min-height: clamp(86px, 15.5vw, 148px);
+  min-height: clamp(96px, 17vw, 165px);
 }
 
 .cal-detail {

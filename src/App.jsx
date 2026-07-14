@@ -1011,27 +1011,25 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
     try { localStorage.setItem(CAL_HIDE_KEY, detailHidden ? "1" : "0"); } catch {}
   }, [CAL_HIDE_KEY, detailHidden]);
 
-  // 핸들 탭/드래그: 아래로 당기면 접힘, 위로 당기면 펴짐, 짧게 누르면 토글
-  const HANDLE_DRAG_PX = 40;
-  const handleStartY = useRef(0);
-  const handleTouched = useRef(false); // 터치 후 고스트 클릭 무시용
-  const onHandleTouchStart = (e) => {
-    e.stopPropagation();               // #3 가로스와이프(widget-body)와 분리
-    handleTouched.current = true;
-    handleStartY.current = e.touches[0].clientY;
+  // #4 캘린더 세로 스와이프: 그리드에서 아래로 밀면 목록 접고 달력 확대, 위로 밀면 목록 복귀
+  // (좌우 스와이프는 그대로 widget-body로 버블링되어 탭 전환 #3 유지)
+  const gridSwipe = useRef(null);
+  const CAL_SWIPE_PX = 46;
+  const onGridTouchStart = (e) => {
+    if (e.touches.length !== 1) { gridSwipe.current = null; return; }
+    gridSwipe.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
   };
-  const onHandleTouchEnd = (e) => {
-    e.stopPropagation();
-    const y1 = e.changedTouches[0]?.clientY ?? handleStartY.current;
-    const dy = y1 - handleStartY.current;
-    if (dy > HANDLE_DRAG_PX) setDetailHidden(true);        // 아래로 당김 → 접기
-    else if (dy < -HANDLE_DRAG_PX) setDetailHidden(false); // 위로 당김 → 펴기
-    else setDetailHidden((v) => !v);                        // 짧게 누름 → 토글
-    setTimeout(() => { handleTouched.current = false; }, 400);
-  };
-  const onHandleClick = () => {
-    if (handleTouched.current) return;  // 폰: 터치로 이미 처리됨
-    setDetailHidden((v) => !v);         // PC: 클릭 토글
+  const onGridTouchEnd = (e) => {
+    const s = gridSwipe.current; gridSwipe.current = null;
+    if (!s) return;
+    const x1 = e.changedTouches[0]?.clientX ?? s.x;
+    const y1 = e.changedTouches[0]?.clientY ?? s.y;
+    const dx = x1 - s.x, dy = y1 - s.y;
+    if (Date.now() - s.t > 800) return;              // 너무 느리면 무시
+    if (Math.abs(dy) < CAL_SWIPE_PX) return;         // 세로 이동 부족 → 탭/가로스와이프에 양보
+    if (Math.abs(dy) < Math.abs(dx) * 1.3) return;   // 가로 우세 → 탭 전환(#3)에 양보
+    if (dy > 0) setDetailHidden(true);               // 아래로 밀기 → 접기(달력 전체화면)
+    else setDetailHidden(false);                     // 위로 밀기 → 목록 복귀
   };
 
   const ownerNameOf = (id) => ((staff || []).find((s) => s.id === id)?.name) || "누군가";
@@ -1108,7 +1106,7 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
         ))}
       </div>
 
-      <div className="cal-grid">
+      <div className="cal-grid" onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
         {cells.map((d, i) => {
           if (d === null) return <div className="cal-cell empty" key={i} />;
           const ds = `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -1145,14 +1143,11 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
       </div>
 
       <div
-        className="cal-handle"
-        onClick={onHandleClick}
-        onTouchStart={onHandleTouchStart}
-        onTouchEnd={onHandleTouchEnd}
-        title={detailHidden ? "펼치기" : "접기 (달력 크게 보기)"}
+        className="cal-collapse-hint"
+        onClick={() => setDetailHidden((v) => !v)}
+        title={detailHidden ? "일정 목록 펴기" : "접고 달력 크게 (아래로 스와이프)"}
       >
-        <span className="cal-handle-grip" />
-        <span className="cal-handle-hint">{detailHidden ? "▾ 일정 목록 펴기" : "▴ 접고 달력 크게"}</span>
+        {detailHidden ? "⌄ 일정 목록 펴기" : "⌃ 위로 · ⌄ 아래로 밀어 달력 크게"}
       </div>
 
       {!detailHidden && (
@@ -1370,9 +1365,27 @@ function msgInTrash(m, uid) {
   if (m.trashed && m.fromId === uid) return true; // 구버전 전역 trashed = 보낸사람 휴지통
   return false;
 }
-function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onMarkUndone, onUnsend, onTrashMine, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif }) {
+function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onMarkUndone, onUnsend, onTrashMine, onRestore, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif }) {
   const [openId, setOpenId] = useState(null);
   const [delId, setDelId] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);  // #5 복사 완료 표시
+  // #5 쪽지 내용 탭/클릭 → 클립보드 복사
+  const copyBody = async (m) => {
+    const text = (m && m.body) || "";
+    if (!text) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        document.execCommand("copy"); document.body.removeChild(ta);
+      }
+      setCopiedId(m.id);
+      setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1500);
+    } catch (e) {}
+  };
   const [inboxAll, setInboxAll] = useState(false);
   const [sentAll, setSentAll] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -1434,7 +1447,8 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         </div>
         {open && (
           <div className="msg-body">
-            <div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div>
+            <div className="msg-text" onClick={() => copyBody(m)} title="탭하면 복사" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "pointer" }}>{m.body}</div>
+            <button className="msg-copy-btn" onClick={() => copyBody(m)}>{copiedId === m.id ? "복사됨 ✓" : "📋 내용 복사"}</button>
             {isTask ? (
               done ? (
                 <div className="msg-step">
@@ -1502,7 +1516,8 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
         </div>
         {open && (
           <div className="msg-body">
-            <div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div>
+            <div className="msg-text" onClick={() => copyBody(m)} title="탭하면 복사" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "pointer" }}>{m.body}</div>
+            <button className="msg-copy-btn" onClick={() => copyBody(m)}>{copiedId === m.id ? "복사됨 ✓" : "📋 내용 복사"}</button>
             <div className="msg-status">
               {(m.toIds || []).map((tid) => {
                 const done = m.done && m.done[tid];
@@ -1551,7 +1566,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
     trash.length === 0 ? <div className="empty">휴지통이 비어 있어요</div> : (
       <>
         <div className="trash-head">
-          <span className="trash-info">보내기취소한 쪽지 {trash.length}건</span>
+          <span className="trash-info">휴지통 {trash.length}건 · 복구 가능</span>
           {confirmEmpty ? (
             <span className="ev-del-wrap">
               <button className="ev-del yes" onClick={async () => { await onEmptyTrash(); setConfirmEmpty(false); }}>비우기</button>
@@ -1573,8 +1588,17 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
                 <span className="msg-badge gray-badge">{mine ? "보낸" : "받은"}</span>
                 <span className="msg-preview">{m.body}</span>
                 <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
+                <button className="msg-restore-btn" onClick={(e) => { e.stopPropagation(); onRestore(m.id); }} title="복구">↩ 복구</button>
               </div>
-              {open && <div className="msg-body"><div className="msg-text" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" }}>{m.body}</div></div>}
+              {open && (
+                <div className="msg-body">
+                  <div className="msg-text" onClick={() => copyBody(m)} title="탭하면 복사" style={{ userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "pointer" }}>{m.body}</div>
+                  <div className="msg-trash-actions">
+                    <button className="msg-copy-btn" onClick={() => copyBody(m)}>{copiedId === m.id ? "복사됨 ✓" : "📋 내용 복사"}</button>
+                    <button className="msg-restore-btn wide" onClick={() => onRestore(m.id)}>↩ 복구하기</button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -2090,6 +2114,15 @@ function App() {
   const unsendMessage = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { unsent: true, ["trashedBy." + myId]: Date.now() }); } catch (e) {} };
   // 휴지통으로 이동 = 내 화면에서만 숨김 (보낸쪽지 정리 / 받은쪽지 정리). 상대 화면엔 영향 없음
   const trashMine = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["trashedBy." + myId]: Date.now() }); } catch (e) {} };
+  // 휴지통 복구 = 내 휴지통에서 꺼냄(trashedBy 제거). 내가 보내기취소한 것이면 unsent도 해제해 상대에게도 복원
+  const restoreMine = async (id) => {
+    try {
+      const m = (messages || []).find((x) => x.id === id);
+      const patch = { ["trashedBy." + myId]: deleteField() };
+      if (m && m.unsent && m.fromId === myId) patch.unsent = deleteField();
+      await updateDoc(doc(db, "office_messages", id), patch);
+    } catch (e) {}
+  };
   // 휴지통 비우기 = 내 휴지통 영구 비움 + 관리자용 기록. (모두 비운 쪽지는 실제 삭제)
   const emptyTrash = async () => {
     const mine = (messages || []).filter((m) => msgInTrash(m, myId));
@@ -2783,6 +2816,7 @@ function App() {
             onMarkUndone={markUndone}
             onUnsend={unsendMessage}
             onTrashMine={trashMine}
+            onRestore={restoreMine}
             onEmptyTrash={emptyTrash}
             trashLogs={trashLogs}
             isAdmin={myRole === "admin"}
