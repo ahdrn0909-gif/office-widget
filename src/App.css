@@ -799,7 +799,7 @@ body {
 .cal-add-btn:hover { background: rgba(255,255,255,0.18); color: #fff; }
 
 /* 상세 행 액션(수정/삭제) */
-.ev-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.ev-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-height: 24px; }
 .ev-edit-x, .ev-del-x {
   border: none;
   background: transparent;
@@ -1021,7 +1021,7 @@ body {
 }
 .cal-ev {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px 6px;
   border-radius: 6px;
@@ -1031,12 +1031,14 @@ body {
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 7px;          /* 첫 줄(24px) 세로 중앙에 맞춤 */
 }
 .cal-ev-kind {
   font-size: 14px;
   color: #9a9aa0;
   flex-shrink: 0;
   min-width: 32px;
+  line-height: 24px;        /* 제목 첫 줄과 정렬 */
 }
 .cal-ev-tag {
   font-size: 11px;
@@ -1050,7 +1052,7 @@ body {
 .cal-ev-tag.schedule { background: rgba(48,209,88,0.18); color: #4ade80; }
 .cal-ev.expandable { cursor: pointer; }
 .cal-ev.expandable:hover { background: rgba(255,255,255,0.05); }
-.cal-ev-chev { font-size: 11px; color: #8e8e93; flex-shrink: 0; }
+.cal-ev-chev { font-size: 11px; color: #8e8e93; flex-shrink: 0; line-height: 24px; }
 
 /* 인라인 비고 편집 */
 .memo-edit { padding: 2px 6px 8px 28px; display: flex; flex-direction: column; gap: 6px; }
@@ -1074,10 +1076,12 @@ body {
 .cal-ev-label {
   font-size: 17px;
   color: #ededf0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   flex: 1;
+  min-width: 0;
+  line-height: 24px;
+  white-space: normal;      /* 여러 줄 허용 (기존 nowrap 해제) */
+  word-break: break-word;
+  overflow-wrap: anywhere;  /* 긴 단어/영문도 줄바꿈 */
 }
 
 /* ===== 네이버 일정 가져오기 패널 ===== */

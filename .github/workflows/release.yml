@@ -8,10 +8,14 @@ on:
 jobs:
   release:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -42,3 +46,55 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # tauri-action 의 latest.json 자동생성이 동작하지 않아(v0.1.11~14 모두 수동 첨부였음)
+      # 여기서 직접 만들어 릴리즈에 올린다. 이 단계가 있어야 PC위젯 자동업데이트가 뜬다.
+      - name: latest.json 생성·첨부
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          SIG_PATH=$(find src-tauri/target/release/bundle -name "*-setup.exe.sig" | head -n 1)
+          if [ -z "${SIG_PATH:-}" ]; then
+            echo "::error::.sig 파일을 찾지 못했습니다. (createUpdaterArtifacts / 서명키 확인)"
+            find src-tauri/target/release/bundle -name "*.sig" || true
+            exit 1
+          fi
+          echo "서명 파일: $SIG_PATH"
+
+          ASSET=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name | endswith("-setup.exe")) | .name' | head -n 1)
+          if [ -z "${ASSET:-}" ]; then
+            echo "::error::릴리즈에서 setup.exe 자산을 찾지 못했습니다."
+            gh release view "$TAG" --json assets --jq '.assets[].name' || true
+            exit 1
+          fi
+          echo "설치본 자산: $ASSET"
+
+          NOTES=$(git tag -l --format='%(contents)' "$TAG" || true)
+          if [ -z "${NOTES:-}" ]; then
+            echo "태그 메시지 없음 → 기본 문구 사용"
+          else
+            echo "릴리즈 노트: $NOTES"
+          fi
+
+          export SIG_PATH ASSET NOTES
+          node .github/scripts/make-latest-json.mjs
+
+          gh release upload "$TAG" latest.json --clobber
+          echo "latest.json 첨부 완료"
+
+      - name: 자동업데이트 확인 (검증)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          NAMES=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          echo "$NAMES"
+          echo "$NAMES" | grep -q '^latest.json$' \
+            && echo "OK: latest.json 이 릴리즈에 있습니다. PC위젯 업데이트가 뜹니다." \
+            || { echo "::error::latest.json 이 없습니다 - 업데이트가 뜨지 않습니다."; exit 1; }
