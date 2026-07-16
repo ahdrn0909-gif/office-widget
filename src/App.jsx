@@ -141,6 +141,31 @@ function weekdayInfoOf(dateStr8) {
   return { weekday: wd, ordinal: ord };
 }
 // 특정 연/월의 'ord번째 weekday' 날짜(일)를 반환. ord=-1이면 마지막. 없으면 null.
+// 음수에도 안전한 나머지 (기준일보다 과거 달/해도 반복 위상이 맞아야 함)
+const mod = (n, m) => ((n % m) + m) % m;
+
+// 반복 간격 선택지 (주기별)
+function intervalOptions(rep) {
+  if (rep === "weekly") return [{ v: 1, l: "매주" }, { v: 2, l: "격주" }, { v: 3, l: "3주" }, { v: 4, l: "4주" }];
+  if (rep === "monthly") return [{ v: 1, l: "매월" }, { v: 2, l: "격월" }, { v: 3, l: "3개월" }, { v: 6, l: "6개월" }];
+  if (rep === "yearly") return [{ v: 1, l: "매년" }, { v: 2, l: "격년" }, { v: 3, l: "3년" }];
+  return [];
+}
+
+// "격주", "3개월마다" 같은 주기 표현
+function everyLabel(rep, iv) {
+  if (rep === "weekly") return iv === 1 ? "매주" : iv === 2 ? "격주" : iv + "주마다";
+  if (rep === "monthly") return iv === 1 ? "매월" : iv === 2 ? "격월" : iv + "개월마다";
+  if (rep === "yearly") return iv === 1 ? "매년" : iv === 2 ? "격년" : iv + "년마다";
+  return "";
+}
+
+// "7/21(화)" 형태 (반복 미리보기용)
+const fmtShortDate = (ds) => {
+  const dt = new Date(ds + "T00:00:00");
+  return (dt.getMonth() + 1) + "/" + dt.getDate() + "(" + WEEKDAY_KR[dt.getDay()] + ")";
+};
+
 function nthWeekdayDay(y, m /*1-12*/, weekday, ord) {
   if (ord === -1) {
     const lastDate = new Date(y, m, 0); // m월 마지막 날
@@ -155,44 +180,52 @@ function nthWeekdayDay(y, m /*1-12*/, weekday, ord) {
 }
 
 // 반복 일정을 창(window) 범위 안에서 실제 날짜들로 펼침
+// repeatEvery: 반복 간격 (1=매주/매월/매년, 2=격주/격월/격년, 3=3주마다 ...). 기준일(date)이 위상을 정함.
 function expandRecurrences(s, winStart, winEnd) {
   const base = s.date;
   if (!base) return [];
   const rep = s.repeat || "none";
   const parts = base.split("-").map(Number);
-  const bm = parts[1], bd = parts[2];
+  const by = parts[0], bm = parts[1], bd = parts[2];
+  const iv = Math.max(1, Number(s.repeatEvery) || 1);
   const out = [];
   const sY = Number(winStart.slice(0, 4)), eY = Number(winEnd.slice(0, 4));
   if (rep === "yearly") {
     if (s.repeatMode === "weekday" && s.weekday != null && s.weekOrdinal) {
       for (let y = sY; y <= eY; y++) {
+        if (mod(y - by, iv) !== 0) continue;
         const day = nthWeekdayDay(y, bm, s.weekday, s.weekOrdinal);
         if (day) { const ds = ymd(y, bm, day); if (ds >= winStart && ds <= winEnd) out.push(ds); }
       }
     } else {
       for (let y = sY; y <= eY; y++) {
+        if (mod(y - by, iv) !== 0) continue;
         if (isValidYMD(y, bm, bd)) { const ds = ymd(y, bm, bd); if (ds >= winStart && ds <= winEnd) out.push(ds); }
       }
     }
   } else if (rep === "monthly") {
+    const baseIdx = by * 12 + bm;
     if (s.repeatMode === "weekday" && s.weekday != null && s.weekOrdinal) {
       for (let y = sY; y <= eY; y++) for (let m = 1; m <= 12; m++) {
+        if (mod(y * 12 + m - baseIdx, iv) !== 0) continue;
         const day = nthWeekdayDay(y, m, s.weekday, s.weekOrdinal);
         if (day) { const ds = ymd(y, m, day); if (ds >= winStart && ds <= winEnd) out.push(ds); }
       }
     } else {
       for (let y = sY; y <= eY; y++) for (let m = 1; m <= 12; m++) {
+        if (mod(y * 12 + m - baseIdx, iv) !== 0) continue;
         if (isValidYMD(y, m, bd)) { const ds = ymd(y, m, bd); if (ds >= winStart && ds <= winEnd) out.push(ds); }
       }
     }
   } else if (rep === "weekly") {
+    const step = 7 * iv;
     const baseDate = new Date(base + "T00:00:00");
     const startDate = new Date(winStart + "T00:00:00");
-    const k = Math.floor((startDate - baseDate) / 86400000 / 7);
-    const occ = new Date(baseDate); occ.setDate(occ.getDate() + k * 7);
-    while (dateStr(occ) < winStart) occ.setDate(occ.getDate() + 7);
+    const k = Math.floor((startDate - baseDate) / 86400000 / step);
+    const occ = new Date(baseDate); occ.setDate(occ.getDate() + k * step);
+    while (dateStr(occ) < winStart) occ.setDate(occ.getDate() + step);
     let guard = 0;
-    while (dateStr(occ) <= winEnd && guard < 600) { out.push(dateStr(occ)); occ.setDate(occ.getDate() + 7); guard++; }
+    while (dateStr(occ) <= winEnd && guard < 600) { out.push(dateStr(occ)); occ.setDate(occ.getDate() + step); guard++; }
   } else if (rep === "lunar_yearly") {
     const lm = s.lunarMonth, ld = s.lunarDay, ll = !!s.lunarLeap;
     if (lm && ld) {
@@ -693,6 +726,7 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
   const [time, setTime] = useState(init.time || "09:00");
   const [repeat, setRepeat] = useState(init.repeat || "none");
   const [repeatMode, setRepeatMode] = useState(init.repeatMode || "date"); // 'date'(지정날짜) | 'weekday'(몇째주 요일)
+  const [repeatEvery, setRepeatEvery] = useState(Math.max(1, Number(init.repeatEvery) || 1)); // 1=매주, 2=격주 ...
   const [memo, setMemo] = useState(init.memo || "");
   const [v, setV] = useState({ visibility: init.visibility || "private", sharedWith: init.sharedWith || [], team: init.team || myTeam || "" });
   const [busy, setBusy] = useState(false);
@@ -718,6 +752,7 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
       allDay,
       time: allDay ? null : time,
       repeat,
+      repeatEvery: intervalOptions(repeat).length ? Math.max(1, Number(repeatEvery) || 1) : 1,
       repeatMode: useWeekday ? "weekday" : "date",
       weekday: winfo ? winfo.weekday : null,
       weekOrdinal: winfo ? winfo.ordinal : null,
@@ -762,35 +797,68 @@ function EventForm({ date, myId, staff, myTeam, editDoc, colorRules, onSaved, on
         {!allDay && <input className="af-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />}
       </div>
       <div className="af-color-label">반복</div>
-      <select className="vis-select" value={repeat} onChange={(e) => setRepeat(e.target.value)}>
+      <select className="vis-select" value={repeat} onChange={(e) => { setRepeat(e.target.value); setRepeatEvery(1); }}>
         <option value="none">반복 없음</option>
         <option value="weekly">매주</option>
         <option value="monthly">매월</option>
         <option value="yearly">매년 (양력)</option>
         <option value="lunar_yearly">매년 (음력)</option>
       </select>
+      {intervalOptions(repeat).length > 0 && (
+        <>
+          <div className="af-color-label">간격</div>
+          <div className="msg-kind-row">
+            {intervalOptions(repeat).map((o) => (
+              <button key={o.v} type="button" className={"msg-kind-btn" + (repeatEvery === o.v ? " on" : "")} onClick={() => setRepeatEvery(o.v)}>{o.l}</button>
+            ))}
+          </div>
+        </>
+      )}
       {(repeat === "monthly" || repeat === "yearly") && (() => {
         const bdNum = Number(d.split("-")[2]);
         const bmNum = Number(d.split("-")[1]);
         const wi = weekdayInfoOf(d);
-        const period = repeat === "yearly" ? "매년" : "매월";
         const dateLabel = repeat === "yearly" ? `${bmNum}월 ${bdNum}일` : `${bdNum}일`;
         const wdLabel = repeat === "yearly"
           ? `${bmNum}월 ${ordinalKr(wi.ordinal)} ${WEEKDAY_KR[wi.weekday]}요일`
           : `${ordinalKr(wi.ordinal)} ${WEEKDAY_KR[wi.weekday]}요일`;
         return (
-          <>
-            <div className="msg-kind-row">
-              <button type="button" className={"msg-kind-btn" + (repeatMode === "date" ? " on" : "")} onClick={() => setRepeatMode("date")}>{dateLabel}</button>
-              <button type="button" className={"msg-kind-btn" + (repeatMode === "weekday" ? " on" : "")} onClick={() => setRepeatMode("weekday")}>{wdLabel}</button>
-            </div>
-            <div className="af-hint">{period} {repeatMode === "weekday" ? wdLabel : dateLabel}에 반복돼요</div>
-          </>
+          <div className="msg-kind-row">
+            <button type="button" className={"msg-kind-btn" + (repeatMode === "date" ? " on" : "")} onClick={() => setRepeatMode("date")}>{dateLabel}</button>
+            <button type="button" className={"msg-kind-btn" + (repeatMode === "weekday" ? " on" : "")} onClick={() => setRepeatMode("weekday")}>{wdLabel}</button>
+          </div>
         );
       })()}
-      {repeat === "lunar_yearly" && (() => {
-        const lu = solarToLunar(d);
-        return <div className="af-hint">{lu ? `매년 음력 ${lu.month}월 ${lu.day}일${lu.leap ? " (윤달)" : ""}에 반복돼요` : "이 날짜는 음력 변환 범위를 벗어났어요"}</div>;
+      {repeat !== "none" && (() => {
+        const lu = repeat === "lunar_yearly" ? solarToLunar(d) : null;
+        if (repeat === "lunar_yearly" && !lu) return <div className="af-hint">이 날짜는 음력 변환 범위를 벗어났어요</div>;
+        const useWd = (repeat === "monthly" || repeat === "yearly") && repeatMode === "weekday";
+        const wi = useWd ? weekdayInfoOf(d) : null;
+        const bdNum = Number(d.split("-")[2]);
+        const bmNum = Number(d.split("-")[1]);
+        let what;
+        if (repeat === "lunar_yearly") what = `음력 ${lu.month}월 ${lu.day}일${lu.leap ? " (윤달)" : ""}`;
+        else if (repeat === "weekly") what = `${WEEKDAY_KR[new Date(d + "T00:00:00").getDay()]}요일`;
+        else if (useWd) what = repeat === "yearly"
+          ? `${bmNum}월 ${ordinalKr(wi.ordinal)} ${WEEKDAY_KR[wi.weekday]}요일`
+          : `${ordinalKr(wi.ordinal)} ${WEEKDAY_KR[wi.weekday]}요일`;
+        else what = repeat === "yearly" ? `${bmNum}월 ${bdNum}일` : `${bdNum}일`;
+        const summary = repeat === "lunar_yearly" ? `매년 ${what}` : `${everyLabel(repeat, repeatEvery)} ${what}`;
+        const probe = {
+          date: d, repeat, repeatEvery,
+          repeatMode: useWd ? "weekday" : "date",
+          weekday: wi ? wi.weekday : null,
+          weekOrdinal: wi ? wi.ordinal : null,
+          lunarMonth: lu ? lu.month : null, lunarDay: lu ? lu.day : null, lunarLeap: lu ? !!lu.leap : false,
+        };
+        const spanY = (repeat === "yearly" || repeat === "lunar_yearly") ? 4 * repeatEvery + 1 : 3;
+        const list = expandRecurrences(probe, d, ymd(Number(d.slice(0, 4)) + spanY, 12, 31)).slice(0, 5);
+        return (
+          <div className="af-hint">
+            <b>{summary}</b>에 반복돼요
+            {list.length > 0 && <><br />다음 {list.length}회 · {list.map(fmtShortDate).join(" · ")}</>}
+          </div>
+        );
       })()}
       <textarea className="af-memo" placeholder="비고 (세부 내용, 선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
       {err && <div className="af-err">{err}</div>}

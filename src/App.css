@@ -691,17 +691,20 @@ body {
   margin-top: 2px;
   width: 100%;
 }
+/* 폰트 크기 = 달력 한 칸 폭 기준으로 "4글자"가 들어가는 최대치.
+   칸 폭 ≈ 화면/7 이므로 3.4vw 기반. 말줄임표(…)는 글자 한 칸을 통째로 먹어서 쓰지 않고
+   네이버 캘린더처럼 그냥 잘라낸다(clip). 덕분에 같은 칸에 글자를 22% 크게 넣을 수 있음. */
 .ev-chip {
-  font-size: clamp(9.5px, 1.5vw, 12px);
-  line-height: 1.3;
+  font-size: clamp(10px, calc(3.4vw - 2.2px), 14px);
+  line-height: 1.32;
   border-radius: 3px;
-  padding: 1px 3px;
+  padding: 1px 2px;
   max-width: 100%;
 }
 .ev-chip.filled {
   color: #fff;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
   font-weight: 500;
 }
@@ -709,7 +712,7 @@ body {
   color: #d8d8dc;
   border-left: 3px solid currentColor;   /* 색은 인라인 borderLeftColor로 지정 */
   border-radius: 0 3px 3px 0;
-  padding: 1px 2px 1px 4px;
+  padding: 1px 1px 1px 3px;
   overflow: hidden;
 }
 .ev-dot { display: none; }   /* 점 폐기(작대기로 대체) */
@@ -717,7 +720,7 @@ body {
   display: block;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 .ev-more {
@@ -823,7 +826,8 @@ body {
 
 .af-tilde { color: #9a9aa0; font-size: 13px; flex-shrink: 0; }
 .af-lunar { display: flex; flex-direction: column; gap: 5px; }
-.af-hint { font-size: 11px; color: #8e8e93; }
+.af-hint { font-size: 11px; color: #8e8e93; line-height: 1.55; }
+.af-hint b { color: #d8d8dc; font-weight: 600; }
 
 /* 날짜 선택기 */
 .af-row .dp { flex: 1; min-width: 0; }
