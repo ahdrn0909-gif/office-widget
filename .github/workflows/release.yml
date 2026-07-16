@@ -33,6 +33,30 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # [버전 자동 주입] 태그(v0.1.17)를 유일한 진실로 삼아 tauri.conf.json 에 박아넣는다.
+      # 이걸 안 하면 tauri.conf.json 버전이 낮은 채로 빌드돼서, latest.json 은 새 버전이라 알리는데
+      # 설치본은 옛 버전 → 업데이트가 영원히 사라지지 않는 무한루프가 생긴다. (v0.1.17 에서 실제 발생)
+      - name: tauri.conf.json 버전을 태그와 일치시키기
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::태그 형식이 vX.Y.Z 가 아닙니다: $TAG"
+            exit 1
+          fi
+          VERSION="$VERSION" node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+            const before = j.version;
+            j.version = process.env.VERSION;
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+            console.log('tauri.conf.json version: ' + before + ' -> ' + j.version);
+          "
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -93,8 +117,16 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          VERSION="${TAG#v}"
           NAMES=$(gh release view "$TAG" --json assets --jq '.assets[].name')
           echo "$NAMES"
+
           echo "$NAMES" | grep -q '^latest.json$' \
-            && echo "OK: latest.json 이 릴리즈에 있습니다. PC위젯 업데이트가 뜹니다." \
             || { echo "::error::latest.json 이 없습니다 - 업데이트가 뜨지 않습니다."; exit 1; }
+
+          # 설치본 파일명에 태그 버전이 들어있어야 한다.
+          # (없으면 tauri.conf.json 버전과 태그가 어긋난 것 → 업데이트 무한루프)
+          echo "$NAMES" | grep -q "_${VERSION}_.*-setup.exe$" \
+            || { echo "::error::설치본 파일명에 버전 ${VERSION} 이 없습니다. 태그와 앱 버전이 어긋났습니다."; exit 1; }
+
+          echo "OK: 설치본 버전 = latest.json 버전 = ${VERSION}. PC위젯 업데이트가 정상 동작합니다."
