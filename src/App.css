@@ -217,6 +217,78 @@ body {
 .msg-restore-btn.wide { margin-left: 0; padding: 4px 12px; }
 .msg-trash-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 
+/* ===== 쪽지 댓글 ===== */
+.msg-cmt-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.10);
+  color: #b9b9bf;
+}
+.msg-cmt-badge::before { content: "💬 "; }
+.cmt-wrap {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.cmt-head { font-size: 11px; color: #8e8e93; margin-bottom: 6px; }
+.cmt-item { padding: 5px 0; }
+.cmt-item.reply {
+  margin-left: 12px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(255,255,255,0.12);
+}
+.cmt-line { display: flex; align-items: center; gap: 6px; }
+.cmt-by { font-size: 12px; font-weight: 600; color: #d8d8dc; }
+.cmt-by.me { color: #4da3ff; }
+.cmt-at { font-size: 10px; color: #7a7a80; }
+.cmt-reply-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: #8e8e93;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.cmt-reply-btn:hover { color: #d8d8dc; text-decoration: underline; }
+.cmt-text {
+  font-size: 13px;
+  color: #ededf0;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 2px;
+}
+.cmt-replying { font-size: 11px; color: #4da3ff; margin: 4px 0 2px; }
+.cmt-input-row { display: flex; gap: 6px; align-items: flex-end; margin-top: 8px; }
+.cmt-ta {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  min-height: 32px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.05);
+  color: #ededf0;
+  font-size: 13px;
+  font-family: inherit;
+}
+.cmt-ta:focus { outline: none; border-color: rgba(10,132,255,0.6); }
+.cmt-send {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: none;
+  background: #0a84ff;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cmt-send:disabled { background: rgba(255,255,255,0.10); color: #7a7a80; cursor: default; }
+
 .msg-compose { display: flex; flex-direction: column; gap: 8px; }
 .msg-ta {
   width: 100%;

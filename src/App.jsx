@@ -12,7 +12,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { doc, getDoc, collection, getDocs, writeBatch, addDoc, deleteDoc, updateDoc, setDoc, onSnapshot, deleteField } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, writeBatch, addDoc, deleteDoc, updateDoc, setDoc, onSnapshot, deleteField, arrayRemove } from "firebase/firestore";
 import KoreanLunarCalendarPkg from "korean-lunar-calendar";
 import { auth, db } from "./firebase";
 import "./App.css";
@@ -1059,7 +1059,7 @@ function NaverImport({ myId, staff, myTeam, onReload }) {
 }
 
 /* ===== 캘린더 탭 ===== */
-function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorRules, onReload, onDeleteSchedule, onUpdateSchedule, onSaveColorRules, newShared, onAckShared }) {
+function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorRules, onReload, onDeleteSchedule, onLeaveSchedule, onUpdateSchedule, onSaveColorRules, newShared, onAckShared }) {
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
   const [sel, setSel] = useState(dateStr(now));
@@ -1238,7 +1238,7 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
                     <span className="cal-ev-kind">일정{e.repeat && e.repeat !== "none" ? " 🔁" : ""}</span>
                     <span className="cal-ev-label">{e.chip}{e.ownerName ? " · " + e.ownerName : ""}</span>
                     <span className="cal-ev-chev">{expanded ? "▴" : "▾"}</span>
-                    {(e.canEdit || e.canDelete) && (
+                    {(e.canEdit || e.canDelete || e.canLeave) && (
                       <span className="ev-actions">
                         {e.canEdit && (
                           <button className="ev-edit-x" onClick={(ev) => { ev.stopPropagation(); openEdit(e.scheduleId); }} title="수정">✎</button>
@@ -1250,6 +1250,14 @@ function CalendarView({ eventsByDate, myId, myTeam, staff, schedulesById, colorR
                           </>
                         ) : (
                           <button className="ev-del-x" onClick={(ev) => { ev.stopPropagation(); setDelId(e.scheduleId); }} title="삭제">✕</button>
+                        ))}
+                        {e.canLeave && (delId === e.scheduleId ? (
+                          <>
+                            <button className="ev-del yes" onClick={(ev) => { ev.stopPropagation(); onLeaveSchedule(e.scheduleId); setDelId(null); }}>빼기</button>
+                            <button className="ev-del no" onClick={(ev) => { ev.stopPropagation(); setDelId(null); }}>취소</button>
+                          </>
+                        ) : (
+                          <button className="ev-del-x" onClick={(ev) => { ev.stopPropagation(); setDelId(e.scheduleId); }} title={`${e.ownerName || "다른 사람"}이 공유한 일정 · 내 달력에서만 빼기`}>⊘</button>
                         ))}
                       </span>
                     )}
@@ -1432,7 +1440,59 @@ function msgInTrash(m, uid) {
   if (m.trashed && m.fromId === uid) return true; // 구버전 전역 trashed = 보낸사람 휴지통
   return false;
 }
-function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onMarkUndone, onUnsend, onTrashMine, onRestore, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif }) {
+/* ===== 쪽지 댓글 (2단계: 댓글 + 대댓글) ===== */
+function CommentThread({ m, myId, onAddComment }) {
+  const [text, setText] = useState("");
+  const [replyTo, setReplyTo] = useState(null);
+  const all = Array.isArray(m.comments) ? m.comments : [];
+  const byAt = (a, b) => (a.at || 0) - (b.at || 0);
+  const roots = all.filter((c) => !c.parentId).sort(byAt);
+  const repliesOf = (id) => all.filter((c) => c.parentId === id).sort(byAt);
+  const selectable = { userSelect: "text", WebkitUserSelect: "text", MozUserSelect: "text", WebkitTouchCallout: "default", cursor: "text" };
+  const submit = () => {
+    const t = text.trim();
+    if (!t) return;
+    onAddComment(m.id, t, replyTo);
+    setText(""); setReplyTo(null);
+  };
+  const row = (c, isReply) => (
+    <div className={"cmt-item" + (isReply ? " reply" : "")} key={c.id}>
+      <div className="cmt-line">
+        <span className={"cmt-by" + (c.byId === myId ? " me" : "")}>{c.byName || "?"}</span>
+        <span className="cmt-at">{fmtMsgTime(c.at)}</span>
+        {!isReply && (
+          <button className="cmt-reply-btn" onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}>
+            {replyTo === c.id ? "취소" : "답글"}
+          </button>
+        )}
+      </div>
+      <div className="cmt-text" style={selectable}>{c.text}</div>
+    </div>
+  );
+  return (
+    <div className="cmt-wrap">
+      <div className="cmt-head">댓글 {all.length}</div>
+      {roots.map((c) => (
+        <div key={c.id}>
+          {row(c, false)}
+          {repliesOf(c.id).map((r) => row(r, true))}
+        </div>
+      ))}
+      {replyTo && <div className="cmt-replying">↳ 답글 다는 중</div>}
+      <div className="cmt-input-row">
+        <textarea
+          className="cmt-ta" rows={1} value={text}
+          placeholder={replyTo ? "답글 입력" : "댓글 입력"}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); } }}
+        />
+        <button className="cmt-send" onClick={submit} disabled={!text.trim()}>등록</button>
+      </div>
+    </div>
+  );
+}
+
+function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, onMarkUndone, onUnsend, onTrashMine, onRestore, onEmptyTrash, trashLogs, isAdmin, onAddTodo, notifSettings, onSaveNotif, onAddComment }) {
   const [openId, setOpenId] = useState(null);
   const [delId, setDelId] = useState(null);
   const [inboxAll, setInboxAll] = useState(false);
@@ -1492,6 +1552,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
           {isTask ? <span className="msg-badge task">업무</span> : <span className="msg-badge notice">전달</span>}
           {stage.label && <span className={"msg-badge " + stage.cls}>{stage.label}</span>}
           <span className="msg-preview">{m.body}</span>
+          {(m.comments || []).length > 0 && <span className="msg-cmt-badge">{(m.comments || []).length}</span>}
           <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
         </div>
         {open && (
@@ -1541,6 +1602,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
             ) : (
               <button className="msg-del" onClick={() => setDelId(m.id)}>휴지통으로 이동</button>
             )}
+            <CommentThread m={m} myId={myId} onAddComment={onAddComment} />
           </div>
         )}
       </div>
@@ -1560,6 +1622,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
           {isTask ? <span className="msg-badge task">업무</span> : <span className="msg-badge notice">전달</span>}
           {st.label && <span className={"msg-badge " + st.cls}>{st.label}</span>}
           <span className="msg-preview">{m.body}</span>
+          {(m.comments || []).length > 0 && <span className="msg-cmt-badge">{(m.comments || []).length}</span>}
           <span className="msg-time">{fmtMsgTime(m.createdAt)}</span>
         </div>
         {open && (
@@ -1603,6 +1666,7 @@ function MessagesView({ myId, staff, messages, onSend, onMarkRead, onMarkDone, o
             ) : (
               <button className="msg-del" onClick={() => setDelId(m.id)}>보내기 취소</button>
             )}
+            <CommentThread m={m} myId={myId} onAddComment={onAddComment} />
           </div>
         )}
       </div>
@@ -2142,6 +2206,29 @@ function App() {
     } catch (e) {}
   };
   const markRead = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["reads." + myId]: Date.now() }); } catch (e) {} };
+
+  // 쪽지 댓글 추가. 쪽지 문서의 comments 배열에 넣으므로 기존 onSnapshot 으로 실시간 반영됨.
+  // parentId 가 있으면 대댓글(2단계까지만).
+  const addComment = async (msgId, text, parentId) => {
+    const t = (text || "").trim();
+    if (!t) return;
+    const m = (messages || []).find((x) => x.id === msgId);
+    const c = {
+      id: "c_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      byId: myId,
+      byName: profile?.name || user?.email || "",
+      text: t,
+      at: Date.now(),
+      parentId: parentId || null,
+    };
+    const patch = { comments: arrayUnion(c) };
+    // 댓글을 달았다는 건 읽었다는 뜻 (받는 사람일 때만)
+    if (m && Array.isArray(m.toIds) && m.toIds.includes(myId) && !((m.reads || {})[myId])) {
+      patch["reads." + myId] = Date.now();
+    }
+    try { await updateDoc(doc(db, "office_messages", msgId), patch); } catch (e) {}
+  };
+
   const markDone = async (id) => { try { await updateDoc(doc(db, "office_messages", id), { ["done." + myId]: Date.now() }); } catch (e) {} };
   // 처리완료 취소 = done만 제거(확인함은 유지) → 발신인 화면도 '확인함'으로 되돌아감. 연동 할일이 있으면 체크도 해제.
   const markUndone = async (id) => {
@@ -2265,7 +2352,11 @@ function App() {
   };
 
   const deleteSchedule = async (id) => {
-    try { await deleteDoc(doc(db, "office_schedules", id)); } catch (e) {}
+    try { await deleteDoc(doc(db, "office_schedules", id)); } catch (e) {}  };
+
+  // 공유받은 일정에서 나만 빠지기 (sharedWith 에서 내 id 만 제거 → 남의 달력엔 그대로 남음)
+  const leaveSchedule = async (id) => {
+    try { await updateDoc(doc(db, "office_schedules", id), { sharedWith: arrayRemove(myId) }); } catch (e) {}
   };
 
   const updateScheduleFields = async (id, patch) => {
@@ -2486,12 +2577,19 @@ function App() {
       const color = scheduleColor(s, myId, colorRules);
       const chip = (s.title || "일정") + (s.allDay ? "" : (s.time ? " " + s.time : ""));
       const mine = s.ownerId === myId;
+      const sharedToMe = !mine && Array.isArray(s.sharedWith) && s.sharedWith.includes(myId);
       const ownerName = mine ? "" : (staffName(s.ownerId) || "");
       const rep = s.repeat || "none";
       const evBase = {
         type: "schedule", allDay: !!s.allDay, color,
         chip, label: chip, title: s.title, scheduleId: s.id, visibility: vis,
-        canEdit: mine, canDelete: true, ownerName, memo: s.memo || "", repeat: rep,
+        // 수정: 만든 사람 + 공유받은 사람 (같이 고쳐 쓰는 일정이므로)
+        canEdit: mine || sharedToMe,
+        // 완전삭제: 만든 사람만. 남이 만든 일정을 모두에게서 지워버리는 사고 방지
+        canDelete: mine,
+        // 공유받은 사람은 '내 달력에서만 빼기' (남의 화면엔 그대로)
+        canLeave: sharedToMe,
+        ownerName, memo: s.memo || "", repeat: rep,
       };
       // 반복 확장은 직접 만든 일정만. 네이버 일정은 실제 발생 날짜가 이미 파일에 있으므로 확장하지 않음
       if (rep !== "none" && s.source !== "naver") {
@@ -2842,6 +2940,7 @@ function App() {
               colorRules={colorRules}
               onReload={loadData}
               onDeleteSchedule={deleteSchedule}
+              onLeaveSchedule={leaveSchedule}
               onUpdateSchedule={updateScheduleFields}
               onSaveColorRules={saveColorRules}
               newShared={newSharedSchedules}
@@ -2860,6 +2959,7 @@ function App() {
             onMarkUndone={markUndone}
             onUnsend={unsendMessage}
             onTrashMine={trashMine}
+            onAddComment={addComment}
             onRestore={restoreMine}
             onEmptyTrash={emptyTrash}
             trashLogs={trashLogs}
