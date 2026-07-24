@@ -1853,9 +1853,29 @@ function CaseRow({ c, isFav, onToggleFav, showOwner, ownerName }) {
     <div className="case-row">
       <button className="fav-btn" onClick={() => onToggleFav(c.id)} title="관심사건">{isFav ? "★" : "☆"}</button>
       <span className="case-name" onClick={() => openCase(c.id)} title="사무실앱에서 열기">{c.caseName || "(사건명 없음)"}</span>
+      <DriveFolderBtn c={c} />
       {showOwner && <span className="case-owner">{ownerName}</span>}
       <span className="case-sub">{c.clientName}</span>
     </div>
+  );
+}
+
+/* 사건의 구글드라이브 폴더 바로가기.
+   driveFolderId 는 폴더를 옮기거나 이름을 바꿔도 그대로라 링크가 깨지지 않는다.
+   폴더가 아직 없으면 아무것도 그리지 않는다. */
+function DriveFolderBtn({ c }) {
+  if (!c) return null;
+  if (!c.driveFolderId) {
+    if (!c.driveFolderError) return null;
+    return <span className="drive-btn err" title={"폴더 자동생성 실패: " + c.driveFolderError}>📁</span>;
+  }
+  const url = c.driveFolderUrl || ("https://drive.google.com/drive/folders/" + c.driveFolderId);
+  return (
+    <span
+      className="drive-btn"
+      title={c.driveFolderName ? ("폴더 열기: " + c.driveFolderName) : "드라이브 폴더 열기"}
+      onClick={(e) => { e.stopPropagation(); openExternal(url); }}
+    >📁</span>
   );
 }
 

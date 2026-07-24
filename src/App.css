@@ -589,6 +589,19 @@ body {
   border-radius: 4px;
 }
 .case-name:hover { color: #fff; text-decoration: underline; }
+
+/* 구글드라이브 폴더 바로가기 */
+.drive-btn {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.5;
+  padding: 2px;
+  border-radius: 4px;
+}
+.drive-btn:hover { opacity: 1; background: rgba(255,255,255,0.10); }
+.drive-btn.err { opacity: 0.85; cursor: help; filter: grayscale(1) sepia(1) saturate(4) hue-rotate(-20deg); }
 .case-sub {
   font-size: 12px;
   color: #9a9aa0;
